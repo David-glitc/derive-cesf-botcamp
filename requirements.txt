@@ -4,3 +4,4 @@ pandas-ta>=0.3
 requests>=2.31
 python-binance>=1.0.19
 pydantic>=2.0
+matplotlib>=3.5

@@ -12,6 +12,8 @@ Buy cheap volatility when the forecast (HAR-RV + EWMA) exceeds implied vol **and
 
 ## 2. Edge
 
+**SVI surface (per expiry):** `w(k)=a+b*(ρ(k-m)+sqrt((k-m)²+σ²))` → IV_ATM, IV_25Δ wing, skew. Fit via coordinate descent, butterfly `g≥0` + calendar `w_later≥w_earlier` no-arb, `repair_calendar` bumps `a`. ATM vs OTM 25Δ: OTM lower gamma, better Sharpe when skew steep (put IV > call IV by 2 vol) → TP 1.8 SL 0.55 hold 48h; ATM TP 1.2 SL 0.48 hold 24h.
+
 **Volatility ensemble (forecast):**
 ```
 HAR: 0.1·RV_m + 0.3·RV_w + 0.6·RV_d  (1d/5d/22d realized variance)
