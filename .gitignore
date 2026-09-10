@@ -9,3 +9,5 @@ venv/
 backtest/*.csv
 backtest/*.png
 data/
+__pycache__/
+*.pyc
