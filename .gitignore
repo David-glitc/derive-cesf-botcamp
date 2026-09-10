@@ -6,8 +6,6 @@ venv/
 .env
 *.log
 .DS_Store
-backtest/*.csv
-backtest/*.png
 data/
 __pycache__/
 *.pyc

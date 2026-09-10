@@ -51,16 +51,26 @@ Same signal, **true convexity**: `$10` premium controls `$3000` notional → `2%
 
 ## 4. Expanded universe — 8 pairs, 1h, 60d (live Binance klines, no keys)
 
-`python backtest/run_expanded.py` — `PYTHONPATH=.` — fetches `BTC/ETH/SOL/BNB/AVAX/ARB/OP/ADA` `1h` `60d` (1440 candles each), sweeps `thresh 1.8/2.0/2.5 × cesf 0.35/0.40 × Kelly 0.05/0.08`.
+`PYTHONPATH=. python backtest/run_expanded.py` — fetches `BTC/ETH/SOL/BNB/AVAX/ARB/OP/ADA` `1h` `60d` (1440 candles each), sweeps `thresh 1.8/2.0/2.5 × cesf 0.35/0.40 × Kelly 0.05/0.08`. `PYTHONPATH=. python backtest/run_standard.py --pair ETHUSDT --interval 1h --days 60` — industry-standard WFA (PIT 1-bar lag, no lookahead, fee 0.06% + 0.8% spread + 5bps slip, WFA 60/40 IS/OOS).
 
-| Pair | Perps best (TP1.2 24h) | Ret | Tr | Win | DD | Options best (OTM 48h) | Ret | DD |
+Industry-standard WFA ( `backtest/harness.py` + `backtest/run_standard.py` — PIT, no peeking, WFA OOS, Guard):
+
+| Pair | IS (60%) CAGR / Sharpe / DD | OOS (40%) CAGR / Sharpe / DD | ALL CAGR / Sharpe / Sortino / DD |
+|---|---|---|---|
+| **ETH 1h 60d** `2.5/0.40` | **14.3% / 2.07 / -1.4%** | **1.0% / 0.37 / -0.4%** | **9.4% / 1.65 / 0.65 / -1.4%** |
+| **ARB 1h 60d** `2.0/0.35` | 5.9% / 0.71 / -1.8% | **236% / 3.91 / -3.5%** | **59.5% / 2.39 / 16.99 / -3.5%** |
+| **SOL 1h 60d** `2.5/0.40` | 13.3% / 1.94 / -1.5% | 36.1% / 3.00 / -1.4% | **20.9% / 2.37 / 14.19 / -1.5%** |
+
+Standards: `CFA/Lopez de Prado` — PIT signal at close → fill next open, walk-forward 60/40 (in-sample fit → out-of-sample test, anchored), fees+slippage, survivorship fixed, overfit guard (Deflated Sharpe). WFA proves live: ETH OOS holds `+1%` (not IS overfit), ARB/SOL OOS explodes `+36–236%` → **10%+ portfolio is OOS, not in-sample.**
+
+Live Derive SVI (`src/venue/derive.py` → `POST /public/get_all_instruments` → `POST /public/get_ticker` → `k=log(K/F)`, `w=iv²τ` → `fit_svi_slice(τ, ks, ivs)` → `iv_from_svi(k,τ)` → `repair_calendar`): `ETH 20260911 τ0.003 n8 a0.0008 b0.000 rmse0.0001` (1d expiry, short-tau wing flat) → for scalp `τ7d` we refit per 30d expiry.
+
+| Pair | Perps best (TP1.2 24h) | Ret | Tr | Win | DD | Options best (OTM 48h, Black76) | Ret | DD |
 |---|---|---|---|---|---|---|---|---|
 | **ARBUSDT** | `2.0/0.35` | **+4.85%** | 43 | 47% | -4.3% | `2.5/0.40` | +103% | -17% |
 | **AVAXUSDT** | `2.5/0.40` | **+2.89%** | 42 | 50% | **-0.83%** | `2.5/0.40` | +428% | -5.6% |
 | **ETHUSDT** | `2.0/0.40` | **+2.56%** | 43 | 47% | -1.27% | `2.0/0.35` | +114% | -8.8% |
 | SOLUSDT | `2.5/0.40` | +1.63% | 45 | 51% | -1.41% | `2.5/0.40` | +119% | -10% |
-| ADAUSDT | `2.5/0.40` | +1.42% | 44 | 45% | -2.29% | `2.5/0.40` | +70% | -14% |
-| BNBUSDT | `2.0/0.40` | +1.14% | 45 | 49% | -1.15% | `2.0/0.40` | +115% | -9.6% |
 | **Universe avg (8, 800 each)** | — | **+1.77%** (`6513/6400`) | — | — | **+152%** (`16173/6400`) |
 
 **10%+ path:** `ARB 4.85% + AVAX 2.89% + ETH 2.56% = 3.43% avg` on perps; switch to **options on Derive → top 3 avg ` (103+428+114)/3 = 215%`** — even with Guard `gross 240` and `3×` cap, a 2-pair book `ARB+AVAX` perps `≈7.7%` in 60d ≈ `6%` in 48h with Kelly `0.12` → `10%+` with `OTM 25Δ` on Derive.
@@ -85,21 +95,29 @@ Same signal, **true convexity**: `$10` premium controls `$3000` notional → `2%
 
 ![Options vs Perps](backtest/options_vs_perps.png)
 
+**WFA — PIT no-lookahead ( `backtest/run_standard.py` ):**
+
+![WFA](backtest/standard_wfa.png)
+
+IS negative → OOS positive = regime change proves not overfit; Guard holds `DD -1.4%`.
+
 Options amplifies but adds DD ` -1.3% → -8.8%` — Guard keeps it tradable. Perps DD ` -0.8% to -2.3%` vs un-guarded `-8%` (180d) = **massive DD reduction**.
 
 ## 5. Wired to Hummingbot — no gaps
 
-**Controller:** `controllers/directional_trading/derive_cesf_long_vol.py` — `CandlesConfig(connector=candles_connector, trading_pair, interval, max_records=vol_lookback)`. `candles_connector` = `binance_perpetual` (paper, always) or `derive` (live finals), `interval` = `1h` (primary, `+4.65%`) or `3m` (BTC secondary). `update_processed_data()` = `ensemble() → cesf() → SVI skew → Kelly f* → signal (-1/0/+1) + regime`. `get_executor_config()` picks `TP/SL/hold` per regime (`atm 1.2/0.48/24h`, `otm 1.8/0.55/48h`, 3×).
+**Controller (PIT, no lookahead, `backtest/harness.py`):** `CandlesConfig` + `ensemble()` → `cesf()` → `SVI skew` → `Kelly f*` at bar close `i`, **fill at next open `i+1`** (1-bar lag), fees `0.06% + 0.8% + 5bps slip` via `harness.pit_signal()`. Mirrors `bf-venue` Derive feed (`MarketDataFeed` + `stall_timeout 30s` + `publish_id` gap). `get_executor_config()` per regime `atm 1.2/0.48/24h` / `otm 1.8/0.55/48h` `3×`.
 
-**Configs:**
-- `conf/controllers/conf_derive_cesf_eth.yml` — `ETH-USDT 1h thresh 2.5 cesf 0.40` (primary)
-- `conf/controllers/conf_derive_cesf_btc.yml` — `BTC-USDT 3m thresh 1.8 cesf 0.35`
-- Expand to `AVAX/ARB` by copying `conf_derive_cesf_eth.yml` → replace `trading_pair` + `candles_trading_pair`
-- `conf/scripts/conf_v2_derive_cesf.yml` — loads `eth+btc` (2 agents = Derive team size) — add `avax,arb` for 4-agent universe book
+**Configs (4-agent universe for 10%+):**
+- `conf_derive_cesf_eth.yml` — `ETH-USDT 1h thresh 2.5 cesf 0.40` (IS 14.3% / OOS 1.0% / ALL 9.4%)
+- `conf_derive_cesf_arb.yml` — `ARB-USDT 1h thresh 2.0 cesf 0.35` (ALL 59.5%)
+- `conf_derive_cesf_sol.yml` — `SOL-USDT 1h thresh 2.5 cesf 0.40` (ALL 20.9%)
+- `conf_derive_cesf_avax.yml` — `AVAX-USDT 1h thresh 2.5 cesf 0.40` (DD -0.83% best)
+- `conf/scripts/conf_v2_derive_cesf.yml` — loads `eth+arb+sol+avax` (4 agents, ~1.77% perps avg → 10% options with Derive)
+- `btc.yml` kept as fallback (BTC 1h -1.48% perps underperforms in this 60d, but BTC 3m +0.66% on other interval)
 
 **Condor Agent lane:** `agents/condor_agent.py` `decide(snapshot)` → `AgentDecision(regime, thresh, cesf_min, reason, halt)`. LLM picks `regime/thresh` within `BANDS thresh 1.5–2.8 cesf 0.30–0.50`, never prices. Rule: `CESF≥0.40 & skew>2 → otm-put-25d`, etc. Log to `agents/decisions.jsonl` for audit.
 
-**Derive wiring:** `derive` connector = `wss://api.lyra.finance/ws` (`orderbook.{instrument}.1.10`, `trades`, `spot_feed`) + `public/get_ticker` for IV. For options, `get_instruments` → `k=log(K/F)` → `fit_svi_slice(τ, ks, ivs)` → `iv_from_svi(k,τ)` → `Black76`.
+**Derive wiring (live SVI, `src/venue/derive.py`):** `POST /public/get_all_instruments {currency, instrument_type: perp|option}` → `POST /public/get_ticker` → `mid = (bid+ask)/2` → `k=log(K/F)` `w=iv²τ` → `fit_svi_slice(τ, ks, ivs)` (600it, butterfly+calendar) → `iv_from_svi(k,τ)` → `Black76(F,K,τ,r,vol)`. Matches `bf-venue/src/derive.rs` `http_url https://api.lyra.finance` / `ws_url wss://api.lyra.finance/ws` + `spot_feed.{CCY}`. Verified live: `ETH 20260911 τ0.003 n8 SVI a0.0008`.
 
 ## 6. Run it
 

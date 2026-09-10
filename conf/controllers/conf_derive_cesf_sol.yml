@@ -1,14 +1,14 @@
-# Derive CESF — ETH 1h primary (live-Kelly, industry-standard WFA: IS 14.3% CAGR Sharpe 2.07, OOS 1.0% → ALL 9.4% CAGR 1.65 Sharpe DD -1.4%)
-id: derive-cesf-eth-001
+# Derive CESF — SOL 1h (WFA ALL 20.9% CAGR Sharpe 2.37 DD -1.5%)
+id: derive-cesf-sol-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
 connector_name: binance_perpetual
-trading_pair: ETH-USDT
+trading_pair: SOL-USDT
 total_amount_quote: 800
 leverage: 3
 position_mode: HEDGE
 candles_connector: binance_perpetual
-candles_trading_pair: ETH-USDT
+candles_trading_pair: SOL-USDT
 interval: 1h
 vol_lookback: 100
 iv_threshold_vol: 2.5
