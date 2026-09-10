@@ -1,0 +1,13 @@
+{
+  "pair": "ETHUSDT",
+  "interval": "3m",
+  "candles": 14400,
+  "days": 29,
+  "starting": 800,
+  "ending": 763.1171163333656,
+  "return_pct": -4.610360458329299,
+  "trades": 21,
+  "wins": 9,
+  "win_rate": 0.42857142857142855,
+  "max_dd_pct": -4.733395751822229
+}

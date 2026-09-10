@@ -1,0 +1,8 @@
+# Hummingbot V2 generic script — loads both ETH + BTC controllers
+# Place in <hummingbot>/conf/scripts/ and run: start --v2 conf_v2_derive_cesf.yml
+
+id: v2-derive-cesf
+script_name: v2_with_controllers
+controllers_config:
+  - conf_derive_cesf_eth.yml
+  - conf_derive_cesf_btc.yml

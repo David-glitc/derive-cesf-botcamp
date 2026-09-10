@@ -1,0 +1,13 @@
+{
+  "pair": "BTCUSDT",
+  "interval": "1h",
+  "candles": 4320,
+  "days": 179,
+  "starting": 800,
+  "ending": 713.2602554935012,
+  "return_pct": -10.84246806331235,
+  "trades": 144,
+  "wins": 65,
+  "win_rate": 0.4513888888888889,
+  "max_dd_pct": -11.809854451290649
+}

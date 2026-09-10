@@ -1,0 +1,34 @@
+# Hummingbot V2 — Derive CESF ETH-USDT (primary: long put / short perp)
+# Place in <hummingbot>/conf/controllers/
+# Or use create --controller-config directional_trading.derive_cesf_long_vol
+
+id: derive-cesf-eth-001
+controller_name: derive_cesf_long_vol
+controller_type: directional_trading
+
+# Execution venue — Botcamp Derive track. For paper use binance_perpetual, for finals use derive.
+connector_name: binance_perpetual
+trading_pair: ETH-USDT
+total_amount_quote: 800
+leverage: 3
+position_mode: HEDGE
+
+# Candle feed — Binance is default (always available). Swap to derive when its feed is live.
+candles_connector: binance_perpetual
+candles_trading_pair: ETH-USDT
+interval: 3m
+
+vol_lookback: 100
+iv_threshold_vol: 1.8
+
+cesf_epsilon: 0.088
+cesf_barrier: 0.80
+cesf_min_score: 0.35
+
+stop_loss: 0.48
+take_profit: 1.2
+time_limit: 86400
+cooldown_time: 120
+executor_refresh_time: 20
+
+candles_config: []
