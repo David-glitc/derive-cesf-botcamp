@@ -1,6 +1,6 @@
-# Flyby — Derive CESF Crash-Mass (Botcamp Agent Builders Cup — Derive)
+# Flyby — Derive CESF (Causal Event Space Framework) · Crash-Mass Long Vol (Botcamp — Derive)
 
-**Flyby · Hummingbot V2 Controller + Condor Agent — SVI + HAR-RV/EWMA + CESF + Kelly — runs on Derive spot/perp *and* options + multi-collateral + portfolio margin.**
+**Flyby · Hummingbot V2 Controller + Condor Agent — SVI + HAR-RV/EWMA + CESF (Causal Event Space Framework) + Kelly — runs on Derive spot/perp *and* options + multi-collateral + portfolio margin.**
 
 > **Derive scoring: all 4 bonuses hit**
 > - **Spot/Perp** `derive` `ETH-PERP / BTC-PERP / SOL-PERP / AVAX-PERP` (WS `spot_feed` + `orderbook`, `https://api.lyra.finance`) — `connector_name: derive`

@@ -77,32 +77,54 @@ Every forecast carries its own uncertainty `ε`.
 
 ---
 
-### 3. CESF — crash-mass filter (what it actually is)
+### 3. CESF — Causal Event Space Framework (your research, correct)
 
-**Plain English:** CESF = *Crash-Enhanced Signature Filter* — it answers *“are paths that end in a crash operationally distinguishable from normal paths right now?”* If yes (`score ≥0.35-0.40`), downside is *tradeable*, not just noisy. HAR tells you *vol is cheap*; CESF tells you *the cheap vol is dangerous (downside)* — so we buy puts. Without CESF you buy cheap vol that never realizes.
+**You’re right — my last edit was wrong.** CESF is **not** “Crash-Enhanced Signature Filter”. It is **Causal Event Space Framework: An Operational Theory of Predictive Relevance under Finite Resolution and Finite Horizon** (David Pere, Aug 2026 — ` /home/david/CESF/CESF.pdf`, `docs/PRINCIPLES.md`). I mis-described it as a crash-signature; I’ve fixed it here.
 
-**Under the hood (signature view):** In the full theory `Ω_H` is the space of `H=42`-bar paths (42×1h = 42h horizon), `Γ_H` is the subset that contains a crash (`maxDD ≥0.60` barrier `0.80`), `G_{ε,H}` is an `ε=0.088`-fattening (operational uncertainty). `R̃_Q → R_Q` extracts the *crash-mass* — how much of that fattened crash set you can robustly tell apart. Flyby uses a fast proxy for this (no signatures needed live):
+**What CESF actually is:** A principled reduction of the infinite theoretical possibility space `Ω` to a finite, decision-relevant operational event space `E_H(Q)` under bounded resolution/horizon. Not a filter, not a signature — a framework:
+
+```
+X_t → Ω_H → Γ_H(C) → G_{ε,H} → Γ_H(C)/~ → R̃_Q → R_Q → E_H(Q) → decision
+```
+
+| Symbol | Means |
+|---|---|
+| `Ω_H` | Theoretical possibility space — all MC trajectories over horizon `H` (Flyby: `H=42` trading days → 42×1h bars, 2000 paths per asset, Merton jump-diffusion calibrated Aug 2024-2026) |
+| `Γ_H(C)` | Admissible reachable set — hard constraints `C` (price>0, `maxDD≤0.60`) |
+| `G_{ε,H}` | ε-connectivity graph — edge if `d_H(γ_i,γ_j) < ε` where `d_H = max_t \|x_i-x_j\|/min(x_i,x_j)` |
+| `Γ_H(C)/~` | Dynamical equivalence classes — **connected components** of `G_{ε,H}` (fixes non-transitive pairwise ε-closeness) |
+| `E_H(Q)` | Operational event space — relevance-filtered classes |
+| `C_{ε,H}=log₂ N_{ε,H}` | Operational complexity in bits |
+
+**Query:** `Q=(C, ε, H, U)` — `ε=0.088` observational tolerance, `H=42`, `U=downside_risk`.
+
+**Three distinctions (core insight):**
+
+1. **Possible ≠ Distinguishable** — microscopically different paths collapse if `d_H < ε`
+2. **Distinguishable ≠ Relevant** — unique ≠ consequential to `U`
+3. **Probability ≠ Relevance** — rare but high-impact survives
+
+**Relevance — two-pass `R_Q = P × (I + M + η·D)`** (`Abstract.md`, `relevance.py:20`):
+
+- `P` class probability mass, `I` maxDD, `M` barrier breach (`barrier=0.80`), `D` terminal persistence, `η=0.5`
+- **Pass 1** cheap proxy ` (s0 - mean_terminal)/s0 ` → retain ≥40th pct
+- **Pass 2** exact `R` → retain ≥30th pct → `E_H(Q)` (probable&relevant + improbable-but-consequential vs improbable&negligible)
+
+**Empirical (16 assets, H=42 ε=0.088, config/default.yaml):** `C_{ε,H}` 0 bits (GOOGL/JNJ/V, 1 class, 2000× compression) → 9.6 bits (UNH, 785 classes, 2.5×, excess kurt 26.6). Driven by vol `r=0.694 p=0.003` and kurtosis `r=0.886 p<1e-5`, no sector effect, 80.5% causal significance under interventions. Source: `data/cesf_all_assets_summary.csv`, `CESF.pdf` pp. 6-15, `cesf_notes.md`.
+
+**What Flyby does live:** True CESF (`G_{ε,H}` + two-pass `R_Q`) is expensive for 1h bars. Flyby uses a **fast trading proxy inspired by CESF** (not CESF itself) that preserves its spirit:
 
 ```
 score = 0.45·tail(1.5σ) + 0.25·kurtosis + 0.2·vol_cluster + 0.1·ε   ∈ [0,1]
-  tail(1.5σ):  % of last 100 rets < -1.5·σ_daily      — are left tails fat right now?
-  kurtosis:    (kurt-3)/10 clipped [0,1]             — are tails getting fatter?
-  vol_cluster: autocorr( r² )  [0,1]                  — is vol clustering (crashes cluster)?
-  ε:           |σ_HAR − σ_EWMA|/0.05 clipped [0,1]    — do forecasts disagree? (regime uncertainty)
+  tail(1.5σ):  % last 100 rets < -1.5·σ_daily
+  kurtosis:    (kurt-3)/10
+  vol_cluster: autocorr(r²)
+  ε:           |σ_HAR − σ_EWMA|/0.05
 ```
 
-**Params:** `H=42` (42h, ~2 days of 1h bars, horizon for a crash to play out), `ε=0.088` (≈8.8% vol uncertainty band, calibrated to 40th percentile proxy / 30th percentile event), `barrier=0.80` (80% retrace distinguishes crash). Tuned once, frozen.
+HAR says “vol is cheap”, **CESF proxy says “and the downside is distinguishable & relevant enough to pay for”** — so we buy puts. Without it you trade 3× more and DD triples (`-1.5% → -8.6%` 180d unguarded). Thresholds `score≥0.40` OTM / `≥0.35` ATM map directly to `E_H(Q)` relevance.
 
-**How Flyby uses it:**
-
-| CESF score | Means | Flyby does |
-|---|---|---|
-| `≥0.40` + `skew>2` + `edge>1.5 vol` | Smile rich + crash-mass high → downside is structurally cheap | **OTM 25Δ put** `TP1.8 SL0.55 48h` via Derive options (best Sharpe when smile rich) |
-| `≥0.35` + `edge>2.5 vol` | Crash-mass moderate, vol cheap | **ATM put** `TP1.2 SL0.48 24h` (primary, or short perp 3× synthetic) |
-| `<0.30` + `|mom 24h|>1.2%` | No crash-mass, but trend | **Trend-ride** call/put `TP1.0 12h` |
-| `<0.30` + low `ε` | Calm | **Flat** — precision > recall by design (Gate). In ACTIVE mode, also `strangle` when `ε>0.04` vol expansion. |
-
-Without CESF you trade 3× more and DD triples (`-1.5% → -8.6%` unguarded 180d). With CESF, `flat` dominates — we only pay when crash is *distinguishable*.
+*Refs: `/home/david/CESF/docs/PRINCIPLES.md`, `/home/david/CESF/Abstract.md`, `/home/david/CESF/cesf_notes.md`, `/home/david/CESF/config/default.yaml` (H=42 ε=0.088 barrier 0.80 proxy 40th/event 30th).*
 
 ---
 

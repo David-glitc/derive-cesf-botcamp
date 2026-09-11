@@ -1,6 +1,6 @@
 """
-Flyby — Derive CESF Crash-Mass Long Vol (Botcamp Agent Builders Cup — Derive)
-FULL STACK: SVI surface + OTM/ATM + Trend + Kelly trade+portfolio + Condor
+Flyby — Derive CESF (Causal Event Space Framework) · Crash-Mass Long Vol (Botcamp — Derive)
+FULL STACK: SVI surface + OTM/ATM + Trend + Kelly trade+portfolio + Condor (CESF proxy)
              + Derive MULTI-COLLATERAL + Derive PORTFOLIO MARGIN
 
 Standalone V2 controller, no private deps. Hummingbot-native.
