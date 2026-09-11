@@ -1,102 +1,144 @@
 #!/usr/bin/env python3
-"""Generate clean, readable flowchart for Derive CESF — replaces Excalidraw export.
-
-Dark theme, high contrast, 300dpi, readable fonts.
-Shows all 12 steps + Derive bonuses (spot/perp, options, multi-collateral, portfolio margin)
+"""Flyby — creative flowchart. Aviation / night-flight theme.
+Single palette, contrail path, glass cards, no rainbow.
 """
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.patheffects as pe
 
-# ── colors ──
-BG = "#0F172A"        # slate-900
-CARD_BG = "#1E293B"   # slate-800
-ACCENT = "#0EA5E9"    # sky-500
-ACCENT2 = "#8B5CF6"   # violet
-ACCENT3 = "#10B981"   # emerald
-ACCENT4 = "#F59E0B"   # amber
-TEXT = "#F8FAFC"
-MUTED = "#94A3B8"
+# — palette — //
+BG = "#050A18"         # deep night
+GRID = "#0F1A33"
+CARD = "#0F172A"
+BORDER = "#1E2A44"
+TEXT = "#E2E8F0"
+MUTED = "#7C8DB0"
+CYAN = "#22D3EE"        # data / sky
+VIOLET = "#8B7CF8"      # logic
+EMERALD = "#34D399"     # risk / guard
+AMBER = "#F59E0B"       # execution / landing
+FAINT = "#1E293B"
 
-fig, ax = plt.subplots(figsize=(16, 11))
+fig, ax = plt.subplots(figsize=(16, 10.5))
 fig.patch.set_facecolor(BG)
 ax.set_facecolor(BG)
 ax.set_xlim(0, 16)
-ax.set_ylim(0, 11)
+ax.set_ylim(0, 10.8)
 ax.axis("off")
 
-def card(x, y, w, h, title, subtitle, color, subtitle_color=MUTED):
-    # rounded rect
-    rect = patches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.08", facecolor=CARD_BG, edgecolor=color, linewidth=2)
+# faint grid
+for x in range(0, 17, 2):
+    ax.plot([x, x], [0, 10.8], color=GRID, lw=0.6, alpha=0.6)
+for y in range(0, 11, 1):
+    ax.plot([0, 16], [y, y], color=GRID, lw=0.6, alpha=0.35)
+
+def glass_card(x, y, w, h, accent, title, body, icon=""):
+    # glow
+    glow = patches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.12,rounding_size=0.18", facecolor=accent, alpha=0.07, edgecolor="none")
+    ax.add_patch(glow)
+    # card
+    rect = patches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.08,rounding_size=0.16", facecolor=CARD, edgecolor=BORDER, linewidth=1.4)
     ax.add_patch(rect)
+    # top accent line
+    line = patches.FancyBboxPatch((x, y+h-0.02), w, 0.04, boxstyle="round,pad=0.02,rounding_size=0.04", facecolor=accent, edgecolor="none", alpha=0.95)
+    ax.add_patch(line)
+    # icon
+    if icon:
+        ax.text(x+0.28, y+h-0.38, icon, ha="left", va="center", fontsize=11, color=accent)
     # title
-    ax.text(x+w/2, y+h*0.62, title, ha="center", va="center", fontsize=10, weight="bold", color=TEXT, family="monospace")
-    ax.text(x+w/2, y+h*0.28, subtitle, ha="center", va="center", fontsize=7.5, color=subtitle_color, family="monospace", linespacing=1.3)
+    ax.text(x+w/2+0.12, y+h*0.62, title, ha="center", va="center", fontsize=8.8, weight="800", color=TEXT, family="sans-serif")
+    # body
+    ax.text(x+w/2, y+h*0.30, body, ha="center", va="center", fontsize=6.7, color=MUTED, family="monospace", linespacing=1.35, weight="400")
 
-def arrow(x1, y1, x2, y2):
-    ax.annotate("", xy=(x2, y2), xytext=(x1, y1), arrowprops=dict(arrowstyle="->", color="#475569", lw=1.8, shrinkA=4, shrinkB=4, connectionstyle="arc3,rad=0"))
+def contrail(x1, y1, x2, y2, col=CYAN, alpha=0.95, lw=2.2, style="straight"):
+    # main contrail
+    if style == "straight":
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                    arrowprops=dict(arrowstyle="-|>", color=col, lw=lw, alpha=alpha,
+                                    connectionstyle="arc3,rad=0", shrinkA=3, shrinkB=5,
+                                    mutation_scale=10))
+    else:
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                    arrowprops=dict(arrowstyle="-|>", color=col, lw=lw, alpha=alpha,
+                                    connectionstyle=f"arc3,rad={style}", shrinkA=3, shrinkB=5,
+                                    mutation_scale=10))
+    # faint outer glow (contrail)
+    ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                arrowprops=dict(arrowstyle="-", color=col, lw=lw+3, alpha=0.14,
+                                connectionstyle="arc3,rad=0" if style=="straight" else f"arc3,rad={style}",
+                                shrinkA=3, shrinkB=5))
 
-# ─ Title ─
-ax.text(8, 10.5, "Derive CESF Crash-Mass  —  Hummingbot V2 Controller + Condor Agent", ha="center", va="center", fontsize=13, weight="bold", color=TEXT, family="monospace")
-ax.text(8, 10.15, "SVI  •  HAR-RV / EWMA  •  CESF  •  Kelly  •  Guard    —    Perps & Options  •  Multi-Collateral  •  Portfolio Margin    •    $800  •  1h  •  4-agent  (ETH/ARB/SOL/AVAX)", ha="center", va="center", fontsize=7, color=MUTED, family="monospace")
-ax.text(8, 9.85, "Derive scoring:  spot/perp [ok]   options via Condor/SVI/Black76 [ok]   multi-collateral ETH/BTC/HYPE/kHYPE [ok]   portfolio margin net D/v/G offsets [ok]", ha="center", va="center", fontsize=7, color=ACCENT, family="monospace", style="italic")
+# — header — flyby wordmark
+ax.text(0.6, 10.35, "✈  FLYBY", ha="left", va="center", fontsize=18, weight="900", color=TEXT, family="sans-serif", 
+        path_effects=[pe.withStroke(linewidth=3, foreground="#0F172A")])
+ax.text(3.45, 10.35, "—  DERIVE  CESF  LONG VOL  ·  1H  ·  800 $  ·  4-AGENT", ha="left", va="center", fontsize=7.5, weight="600", color=MUTED, family="monospace", alpha=0.95)
+ax.text(0.6, 9.92, "Derive spot/perp  ·  Condor options (SVI → Black76)  ·  multi-collateral  ·  portfolio margin net offsets", ha="left", va="center", fontsize=6.8, color=CYAN, family="monospace", alpha=0.9)
+ax.text(15.4, 10.35, "BOTCAMP ’26", ha="right", va="center", fontsize=6.5, weight="700", color="#3B4A6B", family="monospace", bbox=dict(boxstyle="round,pad=0.3", facecolor="#0F172A", edgecolor="#1E2A44", alpha=0.9))
 
-# Row 1: y 8.2
-card(0.4, 8.2, 3.5, 1.3, "1  Market Data", "Binance 1h klines\nDerive WS spot_feed.{CCY}\norderbook.{inst}.1.10", ACCENT)
-card(4.3, 8.2, 3.5, 1.3, "2  SVI Surface", "w(k)=a+b(ρ(k-m)+√…)\nIV_ATM  IV_25Δ  skew\nfit_svi_slice 600it", "#3B82F6")
-card(8.2, 8.2, 3.5, 1.3, "3  Forecast", "HAR 0.1·RVm+0.3·RVw+0.6·RVd\nEWMA λ=0.94 → σ , ε\nensemble(σ,ε)", ACCENT2)
-card(12.1, 8.2, 3.5, 1.3, "4  CESF Crash-Mass", "tail 1.5σ + kurt + cluster + ε\nscore [0,1]  H=42 ε=0.088\nbarrier 0.80", ACCENT3)
+# — row 1: waypoints (data) — cyan family
+glass_card(0.55, 8.55, 3.55, 1.18, CYAN, "01  MARKET DATA", "Binance 1h klines  →  Derive WS\nspot_feed.{CCY}  ·  orderbook 1.10\nwss://api.lyra.finance/ws", "◍")
+glass_card(4.45, 8.55, 3.55, 1.18, CYAN, "02  SVI SMILE", "w(k)=a+b(ρ(k-m)+sqrt…)\nIV_ATM · IV_25D · skew\nfit_svi_slice  butterfly g>=0", "=")
+glass_card(8.35, 8.55, 3.55, 1.18, CYAN, "03  FORECAST", "HAR 0.1·RVm+0.3·RVw+0.6·RVd\nEWMA lambda=0.94  ->  sigma , eps\nensemble -> edge", "~")
+glass_card(12.25, 8.55, 3.55, 1.18, CYAN, "04  CESF PROXY", "tail + kurt + cluster + ε  →  score\nH=42  ε=0.088  barrier 0.80\n[side note — see strategy.md]", "◐")
 
-arrow(3.9, 8.85, 4.3, 8.85)
-arrow(7.8, 8.85, 8.2, 8.85)
-arrow(11.7, 8.85, 12.1, 8.85)
+contrail(4.10, 9.14, 4.45, 9.14, CYAN)
+contrail(8.00, 9.14, 8.35, 9.14, CYAN)
+contrail(11.90, 9.14, 12.25, 9.14, CYAN)
 
-# Row 2: y 6.5
-card(2.0, 6.5, 5.0, 1.3, "5  Regime Router  — Condor decide()", "OTM 25Δ if CESF≥0.40 & skew>2 → derive-options\nATM put if edge>2.5 & score≥0.35 → derive-perp\nTrend if |mom 24×1h|>1.2%  + ACTIVE strangle", "#F59E0B")
-card(8.5, 6.5, 5.5, 1.3, "6  Signal  •  PIT 1-bar lag", "edge = σ_forecast − IV_SVI_ATM\n-1 short / 0 flat / +1 long\nclose i → fill open i+1  (no lookahead)", "#EF4444", MUTED)
+# — decision tower (violet)
+glass_card(2.2, 7.02, 5.2, 1.18, VIOLET, "05  CONDOR  —  regime router", "OTM 25Δ  CESF≥0.40 & skew>2 → derive-options\nATM put  edge>2.5 & score≥0.35 → derive-perp\ntrend |mom|>1.2%  ·  ACTIVE strangle", "⬢")
+glass_card(8.6, 7.02, 5.2, 1.18, VIOLET, "06  SIGNAL  ·  PIT 1-bar", "edge = σ_forecast − IV_SVI_ATM\n−1 short / 0 flat / +1 long\nclose i → fill open i+1  no lookahead", "◇")
 
-arrow(6.0, 7.9, 6.0, 7.8)
-arrow(7.0, 7.15, 8.5, 7.15)
+# contrail from row1 down to tower
+contrail(2.32, 8.55, 2.32, 8.25, CYAN, lw=1.8, alpha=0.65)
+contrail(6.20, 8.55, 4.80, 8.25, CYAN, lw=1.8, alpha=0.5, style="0.15")
+contrail(10.10, 8.55, 11.20, 8.25, CYAN, lw=1.8, alpha=0.5, style="-0.15")
+contrail(14.02, 8.55, 13.80, 8.25, CYAN, lw=1.8, alpha=0.65)
+contrail(7.40, 7.61, 8.60, 7.61, VIOLET)
 
-# Row 3: y 4.8
-card(0.4, 4.8, 3.8, 1.3, "7  Kelly — Trade", "f* = 0.5·edge/ε²·conf\nconf=score/0.35  cap 0.05/0.08\n$10 min  30% cap", "#EC4899")
-card(4.7, 4.8, 5.2, 1.3, "8  PortfolioGuard  — no bypass", "gross 240  per 160  Δ40  ν25  Γ5\nmargin 25%  daily -3%  peak -10%\nnet Δ/ν/Γ offsets (portfolio, not isolated)", "#6366F1")
-card(10.4, 4.8, 4.8, 1.3, "9  Multi-Collateral Vault", "USDC 40%  ETH 30%  BTC 15%\nHYPE 10%  kHYPE 5%  haircuts 0/10/15%\neffective vs USDC-only  +60%", ACCENT3)
+# — risk / vault (emerald family) — one visual family, not rainbow
+glass_card(0.55, 5.48, 3.85, 1.18, EMERALD, "07  KELLY  ·  trade", "f* = 0.5·edge/ε² · conf\nconf=score/0.35  cap 0.05/0.08\n$10 min  ·  30% cap", "◆")
+glass_card(4.75, 5.48, 5.50, 1.18, EMERALD, "08  GUARD  ·  portfolio margin", "gross 240  per 160  Δ40  ν25  Γ5  ·  net offsets\nmargin 25%  daily −3%  peak −10%\nGuard.can_open() → Decision  (10% vs 50%)", "⬣")
+glass_card(10.60, 5.48, 4.85, 1.18, EMERALD, "09  VAULT  ·  multi-collateral", "USDC 40 · ETH 30 · BTC 15 · HYPE 10 · kHYPE 5\n haircuts 0 / 10 / 10 / 15 / 15%\neffective vs USDC-only  +60%", "▣")
 
-arrow(4.2, 5.45, 4.7, 5.45)
-arrow(9.9, 5.45, 10.4, 5.45)
-# vertical from signal to kelly
-arrow(5.0, 6.5, 2.2, 6.1)
-arrow(11.2, 6.5, 7.3, 6.1)
+contrail(4.40, 6.07, 4.75, 6.07, EMERALD)
+contrail(10.25, 6.07, 10.60, 6.07, EMERALD)
+contrail(4.80, 7.02, 2.47, 6.72, VIOLET, lw=1.7, alpha=0.55, style="-0.12")
+contrail(11.20, 7.02, 7.50, 6.72, VIOLET, lw=1.7, alpha=0.55, style="0.12")
 
-# Row 4: y 3.1
-card(0.4, 3.1, 3.8, 1.3, "10  Execution Surface", "Perps: short perp 3× (synthetic put)\nOptions: Black76 τ7d  K=F·0.97\npremium → qty = notional/premium", "#06B6D4")
-card(4.7, 3.1, 5.2, 1.3, "11  Derive Venue  — execution", "derive  perp  orderbook.{ETH-PERP}.1.10\nderive  options  ETH-YYYYMMDD-K-P\nspot ETH-USDC for rebalance", "#14B8A6")
-card(10.4, 3.1, 4.8, 1.3, "12  Risk & Loop", "1 position at a time\nTP1.2/SL0.48 24h  ATM\nTP1.8/SL0.55 48h  OTM", "#A78BFA")
+# — execution (amber, landing strip)
+glass_card(0.55, 3.94, 3.85, 1.18, AMBER, "10  SURFACE", "perps: short 3× = synthetic long put\n options: Black76 τ7d  K=0.97·F\npremium → qty = notional/premium", "✦")
+glass_card(4.75, 3.94, 5.50, 1.18, AMBER, "11  DERIVE VENUE", "perp  orderbook.{ETH-PERP}  ·  options ETH-YYYYMMDD-K-P\n spot ETH-USDC rebalance  ·  wss://api.lyra.finance/ws\n live: BTC/ETH/SOL/HYPE/XRP  ·  AVAX/ARB paper", "✈")
+glass_card(10.60, 3.94, 4.85, 1.18, AMBER, "12  LOOP", "1 position at a time\n TP 1.2/0.48 24h ATM  ·  TP 1.8/0.55 48h OTM\n close → Guard.on_pnl() → next bar", "↺")
 
-arrow(2.2, 4.8, 2.2, 4.4)
-arrow(7.3, 4.8, 7.3, 4.4)
-arrow(12.8, 4.8, 12.8, 4.4)
-arrow(4.2, 3.75, 4.7, 3.75)
-arrow(9.9, 3.75, 10.4, 3.75)
+contrail(4.40, 4.53, 4.75, 4.53, AMBER)
+contrail(10.25, 4.53, 10.60, 4.53, AMBER)
+contrail(2.47, 5.48, 2.47, 5.18, EMERALD, lw=1.7, alpha=0.55)
+contrail(7.50, 5.48, 7.50, 5.18, EMERALD, lw=1.7, alpha=0.55)
+contrail(12.90, 5.48, 12.90, 5.18, EMERALD, lw=1.7, alpha=0.55)
 
-# Bottom loop bar
-loop_rect = patches.FancyBboxPatch((0.4, 1.7), 15.2, 0.9, boxstyle="round,pad=0.06", facecolor="#F8FAFC", edgecolor="#E2E8F0", linewidth=1.5)
-ax.add_patch(loop_rect)
-ax.text(8, 2.25, "Loop  →  next 1h bar close (PIT)    •    Backtest: WFA 60/40  •  fees 0.06% + 0.8% half-spread + 5bps  •  survivorship fixed  •  Guard on every fill", ha="center", va="center", fontsize=7.5, color="#0F172A", family="monospace", weight="bold")
-ax.text(8, 1.9, "Guard can_open(gross, per, Δ, ν, Γ, headroom)  •  CollateralVault effective_collateral()  •  Portfolio margin: 10% gross + ν add vs 50% isolated", ha="center", va="center", fontsize=6.5, color="#475569", family="monospace")
-# arrow down from execution to loop
-arrow(5.5, 3.1, 5.5, 2.6)
-arrow(12.0, 3.1, 12.0, 2.6)
-ax.annotate("", xy=(8, 1.7), xytext=(15.6, 1.2), arrowprops=dict(arrowstyle="->", color="#475569", lw=1.5, connectionstyle="angle3,angleA=-90,angleB=0"))
+# — footer: flight log (one dark bar, not white)
+log = patches.FancyBboxPatch((0.55, 2.35), 14.9, 1.35, boxstyle="round,pad=0.12,rounding_size=0.14", facecolor="#0A142A", edgecolor="#1E2A44", linewidth=1.2)
+ax.add_patch(log)
+ax.text(0.95, 3.28, "FLIGHT LOG  —  PIT 1-bar lag  ·  WFA 60/40  ·  fees 0.06% + 0.8% + 5bps  ·  survivorship fixed  ·  Guard on every fill", ha="left", va="center", fontsize=6.6, weight="700", color="#8EA0C8", family="monospace")
+ax.text(0.95, 2.92, "Guard.can_open(gross, per, Δ, ν, Γ, headroom)  ·  CollateralVault.effective()  ·  portfolio margin 10% + ν vs 50% isolated  ·  1 pos at a time", ha="left", va="center", fontsize=6.2, color="#5A6B8A", family="monospace")
+ax.text(0.95, 2.58, "Backtest 60d — perps +1.73% avg  (+4.23% ARB)  ·  options +159% avg  (+439% AVAX)  ·  WFA IS 13% → OOS 20% (not overfit)  ·  120d OOS +23%", ha="left", va="center", fontsize=6.2, weight="600", color="#7C8DB0", family="monospace")
+# contrail to log
+contrail(2.47, 3.94, 2.47, 3.72, AMBER, lw=1.6, alpha=0.5)
+contrail(7.50, 3.94, 7.50, 3.72, AMBER, lw=1.6, alpha=0.5)
+contrail(12.90, 3.94, 12.90, 3.72, AMBER, lw=1.6, alpha=0.5)
+# subtle runway centerline in log
+for x in range(1, 15):
+    ax.plot([x, x+0.4], [2.48, 2.48], color="#1E2A44", lw=1.2, alpha=0.9)
+    x+=1
 
-# Results bar
-res_rect = patches.FancyBboxPatch((0.4, 0.4), 15.2, 0.9, boxstyle="round,pad=0.06", facecolor="#ECFDF5", edgecolor="#10B981", linewidth=1.8)
-ax.add_patch(res_rect)
-ax.text(8, 0.85, "Perps: +1.74% avg  (+4.25% ARB  +3.53% ETH  -1.54% DD)    •    Options Black76: +159% avg  (+439% AVAX  +223% BTC)  —  same signal, true convexity   •   120d WFA OOS +23% (IS -8% → not overfit)", ha="center", va="center", fontsize=7.2, weight="bold", color="#065F46", family="monospace")
+# — tiny footer
+ax.text(0.6, 0.35, "Flyby  ·  CESF side note — compressed vol space → smoother Black76  ·  H=42 ε=0.088  ·  Kelly half + Guard", ha="left", va="center", fontsize=5.8, color="#3B4A6B", family="monospace")
+ax.text(15.4, 0.35, "flowchart.png  300dpi  ·  dark flight", ha="right", va="center", fontsize=5.8, color="#3B4A6B", family="monospace")
 
 plt.tight_layout()
 plt.savefig("flowchart.png", dpi=300, bbox_inches="tight", facecolor=BG)
 plt.savefig("backtest/flowchart.png", dpi=300, bbox_inches="tight", facecolor=BG)
-print("saved flowchart.png and backtest/flowchart.png (300dpi)")
+print("saved flyby night-flight flowchart 300dpi — palette: night + cyan/violet/emerald/amber, contrail path")
