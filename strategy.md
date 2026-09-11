@@ -30,7 +30,7 @@ Buy cheap volatility — when vol is cheap *and* downside is real, we buy puts. 
 
 ## Architecture
 
-![Flowchart](https://raw.githubusercontent.com/David-glitc/flyby/master/flowchart.png)
+![Flowchart](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/flowchart.png)
 
 ```
 Binance klines ─┐
@@ -86,11 +86,11 @@ ACTIVE mode (finals): `strangle` when vol expansion `ε>0.04` + lower thresholds
 
 **Visuals**
 
-![Confusion](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/confusion.png)
-![Heatmap](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/heatmap.png)
-![Equity](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/equity.png)
-![Options vs Perps](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/options_vs_perps.png)
-![WFA](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/standard_wfa.png)
+![Confusion](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/confusion.png)
+![Heatmap](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/heatmap.png)
+![Equity](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/equity.png)
+![Options vs Perps](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/options_vs_perps.png)
+![WFA](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/standard_wfa.png)
 
 ---
 
