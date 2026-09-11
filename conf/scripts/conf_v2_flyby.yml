@@ -1,0 +1,8 @@
+# Loads 4-agent universe book — 10%+ via diversification + Guard
+id: v2-flyby
+script_name: v2_with_controllers
+controllers_config:
+  - conf_flyby_eth.yml
+  - conf_flyby_arb.yml
+  - conf_flyby_sol.yml
+  - conf_flyby_avax.yml

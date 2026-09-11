@@ -1,20 +1,25 @@
-# Derive CESF Crash-Mass Long Vol — Agent Builders Cup (Derive Track)
+# Flyby — Derive CESF Crash-Mass Long Vol (Agent Builders Cup — Derive)
 
-**Team:** Derive · **Agent type:** Hummingbot V2 Controller + Condor Agent
+**Team:** Derive · **Agent:** Flyby · **Type:** Hummingbot V2 Controller + Condor Agent
 
 **Venue:** Derive **spot + perps (ETH-PERP, BTC-PERP, SOL-PERP, AVAX-PERP)** + **options (Black76 + SVI)** — *all Derive native*
 
 **Capital:** $800 / agent · **Universe:** 8 pairs (BTC / ETH / SOL / BNB / AVAX / ARB / OP / ADA) · **Interval:** `1h` (primary, robust)
 
-> **Derive scoring checklist (all 4 bonuses hit):**
-> - ✅ **Spot/Perp on Derive** — `connector_name: derive`, `trading_pair: ETH-PERP / SOL-PERP ...` (Derive perp USDC-settled; spot `ETH-USDC` for collateral hedge). Candles `derive` WS `spot_feed.{CCY}` + `orderbook.{inst}.1.10` (`wss://api.lyra.finance/ws`), Binance klines only as backtest proxy.
-> - ✅ **Options via Condor (bonus)** — `agents/condor_agent.py` decides OTM/ATM alongside perps; fetches `POST /public/get_ticker` → `k=log(K/F), w=iv²τ` → `fit_svi_slice()` → `iv_from_svi(k)` → `Black76(F,K,τ,r,vol_SVI)` `τ7d 25Δ put` (`TP1.8 SL0.55 48h`). Backtest `options avg +152% / best +428%` — same signal, true convexity, even though options don't exist in the default naïve connector.
-> - ✅ **Multi-collateral (bonus)** — `src/collateral/multi_collateral.py` `CollateralVault` posts `ETH 30% / BTC 15% / HYPE 10% / kHYPE 5% / USDC 40%` with Derive haircuts `ETH 10% BTC 10% HYPE/kHYPE 15%` → `effective_collateral` vs `USDC-only` unlocks `40-60%` headroom. Controller logs `collateral_hint` + Derive spot rebalance (`ETH-USDC`) when drift >8%.
-> - ✅ **Portfolio margin (bonus)** — `src/risk/portfolio_guard.py` `GuardConfig(portfolio_margin_ratio 10% + vega add 2% vs 50% isolated)` on **NET** `Δ/ν/Γ`. Example `long spot +0.3Ξ + short PERP -0.5Ξ + long put +0.25Δ → net -0.25Δ vs gross 1.05Δ` → `~60% less margin`, `2.4×` capital efficiency — unavailable on isolated-margin venues.
+> **Derive scoring — all 4 bonuses hit (accepted template style — table renders on Botcamp)**
+
+| Criterion | Flyby implementation | File | Status |
+|---|---|---|---|
+| **Spot / Perp on Derive** | `connector_name: derive` · `trading_pair: ETH-PERP / BTC-PERP / SOL-PERP / AVAX-PERP` (USDC-settled) · Candles `derive` WS `spot_feed.{CCY}` + `orderbook.{inst}.1.10` `wss://api.lyra.finance/ws` · Binance klines only backtest proxy | `conf_flyby_*.yml` `controllers/directional_trading/flyby.py` | ✅ |
+| **Options via Condor (bonus)** | `agents/condor_agent.py:decide()` OTM 25Δ alongside perps · `POST /public/get_ticker` → `k=log(K/F)` `w=iv²τ` → `fit_svi_slice()` → `iv_from_svi()` → `Black76(F,K,τ7d)` `TP1.8 SL0.55 48h` · `options +159% avg` true convexity | `agents/condor_agent.py` `src/svi/` `src/pricing/black76.py` `src/venue/derive.py` | ✅ |
+| **Multi-collateral (bonus)** | `CollateralVault` `USDC 40% + ETH 30% + BTC 15% + HYPE 10% + kHYPE 5%` haircuts `0 / 10 / 10 / 15 / 15%` → `effective_collateral` vs USDC-only `+60%` headroom · spot rebalance `ETH-USDC` drift >8% | `src/collateral/multi_collateral.py` | ✅ |
+| **Portfolio margin (bonus)** | `GuardConfig 10% gross + 2% vega` on **NET** `Δ / ν / Γ` vs `50%` isolated · `long spot +0.3 + short PERP -0.5 + long put +0.25 → net -0.25 vs gross 1.05` → `60%` less margin `2.4×` efficiency | `src/risk/portfolio_guard.py` | ✅ |
+
+*Bullets (same): Spot/Perp Derive WS · Options Black76/SVI via Condor · Multi-collateral ETH/BTC/HYPE/kHYPE · Portfolio margin net offsets*
 
 **Author:** David Pere · **Code freeze:** Sep 30 · **Finals:** Oct 1–2 (48h)
 
-**Repo:** https://github.com/David-glitc/derive-cesf-botcamp
+**Repo:** https://github.com/David-glitc/flyby (was `derive-cesf-botcamp` — rename pending)
 
 ---
 
@@ -225,25 +230,29 @@ Even with Guard `gross 240` and `3×` cap, a 2-pair book `ARB+AVAX` perps `≈7.
 
 ### Visuals
 
+**Flowchart — Flyby 12-step (300dpi, renders on Botcamp)**
+
+![Flowchart](https://raw.githubusercontent.com/David-glitc/flyby/master/flowchart.png)
+
 **Confusion matrix** — ETH 1h, signal vs 24h fwd >1%
 
-![Confusion](backtest/confusion.png)
+![Confusion](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/confusion.png)
 
 `short` signals catch `short` 24h moves, `flat` dominates (no trade) — precision > recall by design (Gate).
 
 **Heatmap** — ETH 1h return % (thresh × cesf, Kelly 0.08, perps)
 
-![Heatmap](backtest/heatmap.png)
+![Heatmap](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/heatmap.png)
 
 `thresh 1.8–2.0 × cesf 0.40` is the green plateau `+2.5–2.9%`. `thresh 2.8` collapses (over-filter).
 
 **Equity** — universe top 3 perps (1h, Kelly 0.08)
 
-![Equity](backtest/equity.png)
+![Equity](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/equity.png)
 
 **Perps vs Black76 options — same signal, ETH 1h**
 
-![Options vs Perps](backtest/options_vs_perps.png)
+![Options vs Perps](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/options_vs_perps.png)
 
 Options amplifies but adds DD `-1.3% → -8.8%` — Guard keeps it tradable.
 
@@ -251,7 +260,7 @@ Perps DD `-0.8% to -2.3%` vs un-guarded `-8%` (180d) = **massive DD reduction**.
 
 **WFA — PIT no-lookahead** (`backtest/run_standard.py`)
 
-![WFA](backtest/standard_wfa.png)
+![WFA](https://raw.githubusercontent.com/David-glitc/flyby/master/backtest/standard_wfa.png)
 
 IS negative → OOS positive = regime change proves not overfit. Guard holds `DD -1.4%`.
 

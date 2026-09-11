@@ -1,6 +1,6 @@
-# Derive CESF Crash-Mass — Botcamp Agent Builders Cup (Derive)
+# Flyby — Derive CESF Crash-Mass (Botcamp Agent Builders Cup — Derive)
 
-**Hummingbot V2 Controller + Condor Agent — SVI + HAR-RV/EWMA + CESF + Kelly — runs on Derive spot/perp *and* options + multi-collateral + portfolio margin.**
+**Flyby · Hummingbot V2 Controller + Condor Agent — SVI + HAR-RV/EWMA + CESF + Kelly — runs on Derive spot/perp *and* options + multi-collateral + portfolio margin.**
 
 > **Derive scoring: all 4 bonuses hit**
 > - **Spot/Perp** `derive` `ETH-PERP / BTC-PERP / SOL-PERP / AVAX-PERP` (WS `spot_feed` + `orderbook`, `https://api.lyra.finance`) — `connector_name: derive`
@@ -121,7 +121,7 @@ WFA: ![WFA](backtest/standard_wfa.png)
 
 ### Botcamp
 
-Team **Derive** — https://www.botcamp.xyz/dashboard/hackathons/agent-builders-cup-1 — link `https://github.com/David-glitc/derive-cesf-botcamp` + `strategy.md`. Freeze **Sep 30**, finals **Oct 1–2** (48h, `$800`/agent, `P&L+Volume+HBOT`).
+Team **Derive** · Agent **Flyby** — https://www.botcamp.xyz/dashboard/hackathons/agent-builders-cup-1 — link `https://github.com/David-glitc/flyby` (was `derive-cesf-botcamp`) + `strategy.md`. Freeze **Sep 30**, finals **Oct 1–2** (48h, `$800`/agent, `P&L+Volume+HBOT`).
 
 > **Bottom line:** `Perps = +4.62% ETH (honest, Guard DD -1.54%)`, `Options = +152% avg / +428% best (Derive native)` — same edge, different leverage. Ship `1h` slow candles, `4-agent` universe (`ETH/ARB/SOL/AVAX`), `Derive options` live → `10%+`.
 
