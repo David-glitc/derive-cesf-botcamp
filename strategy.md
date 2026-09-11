@@ -1,8 +1,8 @@
 # Flyby — Derive CESF Long Vol (Agent Builders Cup — Derive)
 
 **Team:** Derive · **Agent:** Flyby · **Type:** Hummingbot V2 Controller + Condor Agent  
-**Venue:** Derive **spot + perps (ETH-PERP, BTC-PERP, SOL-PERP, AVAX-PERP)** + **options (Black76 + SVI)** — *all Derive native*  
-**Capital:** $800 / agent · **Universe:** 8 pairs (BTC / ETH / SOL / BNB / AVAX / ARB / OP / ADA) · **Interval:** `1h` (primary)  
+**Venue:** Derive **spot + perps (ETH-PERP, BTC-PERP, SOL-PERP, ADA-PERP, HYPE-PERP, XRP-PERP live)** + **options (Black76 + SVI)** — *Derive native where listed*  
+**Capital:** $800 / agent · **Universe:** 8 pairs tested (BTC / ETH / SOL / BNB / AVAX / ARB / OP / ADA) — **live Derive:** BTC/ETH/SOL/ADA/HYPE/XRP/BNB-perps + BTC/ETH/SOL/ADA/HYPE/XRP options live; **AVAX/ARB/OP not on Derive yet — Binance klines proxy purely for testing, live fallback HYPE/XRP** · **Interval:** `1h` (primary)  
 
 > **Derive scoring — all 4 bonuses hit**
 

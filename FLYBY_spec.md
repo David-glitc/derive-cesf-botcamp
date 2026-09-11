@@ -47,14 +47,15 @@ Venue
 |---|---|
 | House | Derive |
 | Connector | derive (perps) + derive options via Condor routines |
-| Pairs | ETH-PERP, BTC-PERP, SOL-PERP, AVAX-PERP (ARBUSDT as variant) |
-| Margin | Posted ETH/BTC/HYPE/kHYPE + USDC sleeve — multi-collateral |
+| Pairs (live Derive) | **ETH-PERP, BTC-PERP, SOL-PERP, ADA-PERP, HYPE-PERP, XRP-PERP, BNB-PERP** (all `POST /public/get_all_instruments` verified — perps + options where listed) |
+| Pairs (synthetic, not on Derive yet) | **AVAX-PERP, ARB-PERP, OP-PERP** — *Instrument not found* on Derive mainnet — **Binance klines proxy purely for testing the strategy, not live Derive** — live fallback is `HYPE-PERP` / `XRP-PERP` |
+| Margin | Posted ETH/BTC/HYPE/kHYPE + USDC sleeve — multi-collateral (Derive vault) |
 | Style | Compressed vol space · matching long vol · hourly edge · optional 7d put |
-| Execution | Hummingbot position_executor on the perp; Black76/SVI on options |
-| Options | Isolated Condor Black76/SVI ticket — optional, when signer is live |
-| Validated | Pure tests + loader + public SVI read + live end-to-end proof (real resting ETH perp synthetic + real resting AVAX 25Δ put via Black76 on Derive) |
+| Execution | Hummingbot position_executor on the perp; Black76/SVI on options (live) / synthetic perps (paper) |
+| Options live on Derive | **BTC 812, ETH 742, SOL 428, ADA 250, HYPE, XRP, ZEC, XAUT, CC** — AVAX/ARB/OP/BNB-options **not on Derive yet** (tested synthetic via Black76 proxy) |
+| Validated | Pure tests + loader + public SVI read + live end-to-end proof (real resting ETH-PERP + ETH 25Δ put via Black76 on Derive; synthetics use Binance klines) |
 
-Do not invent another house or another underlying without a SVI tape. kHYPE is collateral, not this book's underlying. Do not buy a put through Hummingbot without Condor.
+Do not invent another house or another underlying without a SVI tape. kHYPE is collateral, not this book's underlying. Do not buy a put through Hummingbot without Condor. Synthetic pairs are paper-only until Derive lists them.
 
 Viability
 Open / keep the hedge only when all of these hold:

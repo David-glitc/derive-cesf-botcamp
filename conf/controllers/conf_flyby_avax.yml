@@ -1,5 +1,6 @@
 # Flyby — Derive CESF — AVAX 1h (+2.89% perps, +428% options, DD -0.83% best DD)
-# Venue: Derive — AVAX-PERP spot/perp ✔ + AVAX options OTM 25Δ (best convexity) via Condor
+# NOTE: AVAX-PERP / AVAX options NOT on Derive yet (POST /public/get_all_instruments → Instrument not found) — Binance klines proxy purely for testing the strategy, live fallback HYPE-PERP/XRP-PERP
+# Venue: Derive — synthetic AVAX-PERP (paper) → live fallback HYPE/XRP (Derive native)
 id: flyby-avax-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
