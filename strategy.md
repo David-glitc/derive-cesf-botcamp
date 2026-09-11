@@ -2,9 +2,15 @@
 
 **Team:** Derive · **Agent type:** Hummingbot V2 Controller + Condor Agent
 
-**Venue:** Derive **options** (Black76 + SVI) + Derive perp fallback
+**Venue:** Derive **spot + perps (ETH-PERP, BTC-PERP, SOL-PERP, AVAX-PERP)** + **options (Black76 + SVI)** — *all Derive native*
 
 **Capital:** $800 / agent · **Universe:** 8 pairs (BTC / ETH / SOL / BNB / AVAX / ARB / OP / ADA) · **Interval:** `1h` (primary, robust)
+
+> **Derive scoring checklist (all 4 bonuses hit):**
+> - ✅ **Spot/Perp on Derive** — `connector_name: derive`, `trading_pair: ETH-PERP / SOL-PERP ...` (Derive perp USDC-settled; spot `ETH-USDC` for collateral hedge). Candles `derive` WS `spot_feed.{CCY}` + `orderbook.{inst}.1.10` (`wss://api.lyra.finance/ws`), Binance klines only as backtest proxy.
+> - ✅ **Options via Condor (bonus)** — `agents/condor_agent.py` decides OTM/ATM alongside perps; fetches `POST /public/get_ticker` → `k=log(K/F), w=iv²τ` → `fit_svi_slice()` → `iv_from_svi(k)` → `Black76(F,K,τ,r,vol_SVI)` `τ7d 25Δ put` (`TP1.8 SL0.55 48h`). Backtest `options avg +152% / best +428%` — same signal, true convexity, even though options don't exist in the default naïve connector.
+> - ✅ **Multi-collateral (bonus)** — `src/collateral/multi_collateral.py` `CollateralVault` posts `ETH 30% / BTC 15% / HYPE 10% / kHYPE 5% / USDC 40%` with Derive haircuts `ETH 10% BTC 10% HYPE/kHYPE 15%` → `effective_collateral` vs `USDC-only` unlocks `40-60%` headroom. Controller logs `collateral_hint` + Derive spot rebalance (`ETH-USDC`) when drift >8%.
+> - ✅ **Portfolio margin (bonus)** — `src/risk/portfolio_guard.py` `GuardConfig(portfolio_margin_ratio 10% + vega add 2% vs 50% isolated)` on **NET** `Δ/ν/Γ`. Example `long spot +0.3Ξ + short PERP -0.5Ξ + long put +0.25Δ → net -0.25Δ vs gross 1.05Δ` → `~60% less margin`, `2.4×` capital efficiency — unavailable on isolated-margin venues.
 
 **Author:** David Pere · **Code freeze:** Sep 30 · **Finals:** Oct 1–2 (48h)
 

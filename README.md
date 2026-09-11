@@ -1,5 +1,13 @@
 # Derive CESF Crash-Mass — Botcamp Agent Builders Cup (Derive)
 
+**Hummingbot V2 Controller + Condor Agent — SVI + HAR-RV/EWMA + CESF + Kelly — runs on Derive spot/perp *and* options + multi-collateral + portfolio margin.**
+
+> **Derive scoring: all 4 bonuses hit**
+> - **Spot/Perp** `derive` `ETH-PERP / BTC-PERP / SOL-PERP / AVAX-PERP` (WS `spot_feed` + `orderbook`, `https://api.lyra.finance`) — `connector_name: derive`
+> - **Options via Condor** `agents/condor_agent.py` → `src/svi` `fit_svi_slice` → `src/pricing/black76.py` `Black76 τ7d 25Δ put` alongside perps (synthetic `short perp 3×` fallback for paper)
+> - **Multi-collateral** `src/collateral/multi_collateral.py` `ETH/BTC/HYPE/kHYPE` vault `USDC 40% ETH 30% BTC 15% HYPE 10% kHYPE 5%` haircuts `10/10/15/15/0%`
+> - **Portfolio margin** `src/risk/portfolio_guard.py` `10% gross + vega add` on **NET** `Δ/ν/Γ` vs `50%` isolated → `~60%` less margin
+
 **Hummingbot V2 Controller + Condor Agent — SVI + HAR-RV/EWMA + CESF + Kelly — runs on perps *and* options.**
 
 | Surface | Venue | Best live | Trades | Win | DD | How |

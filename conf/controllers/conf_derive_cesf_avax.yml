@@ -1,14 +1,15 @@
 # Derive CESF — AVAX 1h (+2.89% perps, +428% options, DD -0.83% best DD)
+# Venue: Derive — AVAX-PERP spot/perp ✔ + AVAX options OTM 25Δ (best convexity) via Condor
 id: derive-cesf-avax-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
-connector_name: binance_perpetual
-trading_pair: AVAX-USDT
+connector_name: derive
+trading_pair: AVAX-PERP
 total_amount_quote: 800
 leverage: 3
 position_mode: HEDGE
-candles_connector: binance_perpetual
-candles_trading_pair: AVAX-USDT
+candles_connector: derive
+candles_trading_pair: AVAX-PERP
 interval: 1h
 vol_lookback: 100
 iv_threshold_vol: 2.5
@@ -24,4 +25,8 @@ take_profit: 1.2
 time_limit: 86400
 cooldown_time: 120
 executor_refresh_time: 20
+collateral_asset: multi
+portfolio_margin: true
+options_enabled: true
+spot_hedge_enabled: true
 candles_config: []

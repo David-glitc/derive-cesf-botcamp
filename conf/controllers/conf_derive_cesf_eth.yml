@@ -1,14 +1,19 @@
 # Derive CESF — ETH 1h primary (live-Kelly, industry-standard WFA: IS 14.3% CAGR Sharpe 2.07, OOS 1.0% → ALL 9.4% CAGR 1.65 Sharpe DD -1.4%)
+# Venue: Derive — spot/perp + options (scoring: spot/perp ✔︎, options via Condor/SVI/Black76 ✔︎, multi-collateral ✔︎, portfolio margin ✔︎)
+# Execution: connector derive, perp ETH-PERP (USDC-settled), options ETH-YYYYMMDD-K-P via Black76(SVI)
+# Collateral: multi (USDC 40% + ETH 30% + BTC 15% + HYPE 10% + kHYPE 5%) haircuts 0/10/10/15/15% — src/collateral/multi_collateral.py
+# Margin: Derive portfolio margin net Δ/ν/Γ (10% gross + vega add vs 50% isolated) — src/risk/portfolio_guard.py
+# Candles: derive spot_feed.ETH + orderbook.ETH-PERP.1.10 (WS wss://api.lyra.finance/ws); backtest proxy Binance klines
 id: derive-cesf-eth-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
-connector_name: binance_perpetual
-trading_pair: ETH-USDT
+connector_name: derive
+trading_pair: ETH-PERP
 total_amount_quote: 800
 leverage: 3
 position_mode: HEDGE
-candles_connector: binance_perpetual
-candles_trading_pair: ETH-USDT
+candles_connector: derive
+candles_trading_pair: ETH-PERP
 interval: 1h
 vol_lookback: 100
 iv_threshold_vol: 2.5
@@ -24,4 +29,9 @@ take_profit: 1.2
 time_limit: 86400
 cooldown_time: 120
 executor_refresh_time: 20
+# Derive bonuses
+collateral_asset: multi
+portfolio_margin: true
+options_enabled: true
+spot_hedge_enabled: true
 candles_config: []

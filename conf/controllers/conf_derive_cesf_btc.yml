@@ -1,28 +1,32 @@
-# Hummingbot V2 — Derive CESF BTC-USDT (secondary: long call)
+# Derive CESF — BTC 1h fallback (Derive BTC-PERP + BTC options, multi-collateral BTC 15%)
+# Venue: Derive — BTC-PERP + BTC-YYYYMMDD-K-C/P options (Black76/SVI), portfolio margin net BTC/ETH
 id: derive-cesf-btc-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
-
-connector_name: binance_perpetual
-trading_pair: BTC-USDT
+connector_name: derive
+trading_pair: BTC-PERP
 total_amount_quote: 800
 leverage: 3
 position_mode: HEDGE
-
-candles_connector: binance_perpetual
-candles_trading_pair: BTC-USDT
-interval: 3m
-
+candles_connector: derive
+candles_trading_pair: BTC-PERP
+interval: 1h
 vol_lookback: 100
 iv_threshold_vol: 1.8
 cesf_epsilon: 0.088
 cesf_barrier: 0.80
 cesf_min_score: 0.35
-
+svi_skew_threshold: 2.0
 stop_loss: 0.48
 take_profit: 1.2
 time_limit: 86400
 cooldown_time: 120
 executor_refresh_time: 20
-
+kelly_cap: 0.08
+max_fraction: 0.05
+regime: auto
+collateral_asset: multi
+portfolio_margin: true
+options_enabled: true
+spot_hedge_enabled: true
 candles_config: []

@@ -1,14 +1,16 @@
 # Derive CESF — ARB 1h (best perps +4.85% 59d, WFA ALL 59.5% CAGR Sharpe 2.39)
+# Venue: Derive — ARB-PERP (or ARB-USDC spot if perp not listed; fallback BTC/ETH perps + ARB options wing)
+# Bonuses: multi-collateral (HYPE/kHYPE showcase) + portfolio margin net offsets + Condor OTM options
 id: derive-cesf-arb-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
-connector_name: binance_perpetual
-trading_pair: ARB-USDT
+connector_name: derive
+trading_pair: ARB-PERP
 total_amount_quote: 800
 leverage: 3
 position_mode: HEDGE
-candles_connector: binance_perpetual
-candles_trading_pair: ARB-USDT
+candles_connector: derive
+candles_trading_pair: ARB-PERP
 interval: 1h
 vol_lookback: 100
 iv_threshold_vol: 2.0
@@ -24,4 +26,8 @@ take_profit: 1.2
 time_limit: 86400
 cooldown_time: 120
 executor_refresh_time: 20
+collateral_asset: multi
+portfolio_margin: true
+options_enabled: true
+spot_hedge_enabled: true
 candles_config: []

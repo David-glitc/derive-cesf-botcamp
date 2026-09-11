@@ -1,14 +1,15 @@
 # Derive CESF — SOL 1h (WFA ALL 20.9% CAGR Sharpe 2.37 DD -1.5%)
+# Venue: Derive — SOL-PERP + SOL options (25Δ wings cheap when SVI skew >2)
 id: derive-cesf-sol-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
-connector_name: binance_perpetual
-trading_pair: SOL-USDT
+connector_name: derive
+trading_pair: SOL-PERP
 total_amount_quote: 800
 leverage: 3
 position_mode: HEDGE
-candles_connector: binance_perpetual
-candles_trading_pair: SOL-USDT
+candles_connector: derive
+candles_trading_pair: SOL-PERP
 interval: 1h
 vol_lookback: 100
 iv_threshold_vol: 2.5
@@ -24,4 +25,8 @@ take_profit: 1.2
 time_limit: 86400
 cooldown_time: 120
 executor_refresh_time: 20
+collateral_asset: multi
+portfolio_margin: true
+options_enabled: true
+spot_hedge_enabled: true
 candles_config: []
