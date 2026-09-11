@@ -77,18 +77,32 @@ Every forecast carries its own uncertainty `ε`.
 
 ---
 
-### 3. CESF — crash-mass filter
+### 3. CESF — crash-mass filter (what it actually is)
 
-`H=42  ε=0.088  barrier=0.80`
+**Plain English:** CESF = *Crash-Enhanced Signature Filter* — it answers *“are paths that end in a crash operationally distinguishable from normal paths right now?”* If yes (`score ≥0.35-0.40`), downside is *tradeable*, not just noisy. HAR tells you *vol is cheap*; CESF tells you *the cheap vol is dangerous (downside)* — so we buy puts. Without CESF you buy cheap vol that never realizes.
+
+**Under the hood (signature view):** In the full theory `Ω_H` is the space of `H=42`-bar paths (42×1h = 42h horizon), `Γ_H` is the subset that contains a crash (`maxDD ≥0.60` barrier `0.80`), `G_{ε,H}` is an `ε=0.088`-fattening (operational uncertainty). `R̃_Q → R_Q` extracts the *crash-mass* — how much of that fattened crash set you can robustly tell apart. Flyby uses a fast proxy for this (no signatures needed live):
 
 ```
-Ω_H (2000 paths) → Γ_H(C maxDD 0.60) → G_{ε,H} → components
-  → R̃_Q → R_Q
-
 score = 0.45·tail(1.5σ) + 0.25·kurtosis + 0.2·vol_cluster + 0.1·ε   ∈ [0,1]
+  tail(1.5σ):  % of last 100 rets < -1.5·σ_daily      — are left tails fat right now?
+  kurtosis:    (kurt-3)/10 clipped [0,1]             — are tails getting fatter?
+  vol_cluster: autocorr( r² )  [0,1]                  — is vol clustering (crashes cluster)?
+  ε:           |σ_HAR − σ_EWMA|/0.05 clipped [0,1]    — do forecasts disagree? (regime uncertainty)
 ```
 
-Calibrated to `CESF` defaults: `H=42`, `ε=0.088`, `barrier=0.80`, `proxy 40th pct`, `event 30th pct`.
+**Params:** `H=42` (42h, ~2 days of 1h bars, horizon for a crash to play out), `ε=0.088` (≈8.8% vol uncertainty band, calibrated to 40th percentile proxy / 30th percentile event), `barrier=0.80` (80% retrace distinguishes crash). Tuned once, frozen.
+
+**How Flyby uses it:**
+
+| CESF score | Means | Flyby does |
+|---|---|---|
+| `≥0.40` + `skew>2` + `edge>1.5 vol` | Smile rich + crash-mass high → downside is structurally cheap | **OTM 25Δ put** `TP1.8 SL0.55 48h` via Derive options (best Sharpe when smile rich) |
+| `≥0.35` + `edge>2.5 vol` | Crash-mass moderate, vol cheap | **ATM put** `TP1.2 SL0.48 24h` (primary, or short perp 3× synthetic) |
+| `<0.30` + `|mom 24h|>1.2%` | No crash-mass, but trend | **Trend-ride** call/put `TP1.0 12h` |
+| `<0.30` + low `ε` | Calm | **Flat** — precision > recall by design (Gate). In ACTIVE mode, also `strangle` when `ε>0.04` vol expansion. |
+
+Without CESF you trade 3× more and DD triples (`-1.5% → -8.6%` unguarded 180d). With CESF, `flat` dominates — we only pay when crash is *distinguishable*.
 
 ---
 
