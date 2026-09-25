@@ -1,129 +1,141 @@
-# Flyby — Derive CESF (Causal Event Space Framework) · Crash-Mass Long Vol (Botcamp — Derive)
+# Flyby — Derive Volatility Agent
 
-**Flyby · Hummingbot V2 Controller + Condor Agent — SVI + HAR-RV/EWMA + CESF (Causal Event Space Framework) + Kelly — runs on Derive spot/perp *and* options + multi-collateral + portfolio margin.**
+Flyby is a Hummingbot V2 Controller plus Condor Agent for Derive. It buys volatility when the forecast says realized volatility should exceed the Derive SVI surface and CESF crash-mass says the move is real enough to trade.
 
-> **Derive scoring: all 4 bonuses hit**
-> - **Spot/Perp** `derive` `ETH-PERP / BTC-PERP / SOL-PERP / ADA-PERP / HYPE-PERP / XRP-PERP` live (`AVAX/ARB/OP not on Derive yet — Binance proxy purely for testing`) (WS `spot_feed` + `orderbook`, `https://api.lyra.finance`) — `connector_name: derive`
-> - **Options via Condor** `agents/condor_agent.py` → `src/svi` `fit_svi_slice` → `src/pricing/black76.py` `Black76 τ7d 25Δ put` alongside perps (synthetic `short perp 3×` fallback for paper)
-> - **Multi-collateral** `src/collateral/multi_collateral.py` `ETH/BTC/HYPE/kHYPE` vault `USDC 40% ETH 30% BTC 15% HYPE 10% kHYPE 5%` haircuts `10/10/15/15/0%`
-> - **Portfolio margin** `src/risk/portfolio_guard.py` `10% gross + vega add` on **NET** `Δ/ν/Γ` vs `50%` isolated → `~60%` less margin
+For Botcamp judging, the short version is simple: Flyby is a Derive-native vol/options agent built for Derive’s volatility surface. It combines SVI, Black76, HAR-RV/EWMA, CESF, Kelly sizing, and hard portfolio guards, with a v3 testnet proof lane and a V2 mainnet controller lane.
 
-**Hummingbot V2 Controller + Condor Agent — SVI + HAR-RV/EWMA + CESF + Kelly — runs on perps *and* options.**
+## Read First
 
-| Surface | Venue | Best live | Trades | Win | DD | How |
-|---|---|---|---|---|---|---|
-| **Perps** (proxy) | `binance_perpetual` → `derive` perp | **ETH 1h 60d +4.62%** (`836/800`) | 41 | 58.5% | **-1.54%** | `short perp 3×` = synthetic long put, `TP1.2 SL0.48 24h` |
-| **Options** (Derive native) | `derive` options `Black76(SVI)` | **avg +152% / best +428%** (`AVAX 1h 60d`) | 36 | 50% | -5.6% | `long 25Δ put τ7d` `TP1.8 SL0.55 48h` via `w(k)=a+b(ρ(k-m)+√((k-m)²+σ²))` |
+| Doc | Use |
+|---|---|
+| [`strategy.md`](strategy.md) | Main Botcamp submission and strategy explanation |
+| [`SUBMISSION_POSITIONING.md`](SUBMISSION_POSITIONING.md) | Rules, public landscape, and how Flyby stands out |
+| [`FLYBY_V3_TESTNET.md`](FLYBY_V3_TESTNET.md) | Derive v3 testnet runbook |
+| [`hb_backtest/testnet_proof.md`](hb_backtest/testnet_proof.md) | Testnet proof notes |
+| [`hb_backtest/flyby_v3_testnet.jsonl`](hb_backtest/flyby_v3_testnet.jsonl) | Live/testnet decision and order trace |
 
-> `ETH 1h +4.62%` is the **honest perps proxy** (Guard-capped, fees+slippage, PIT). **Options on Derive is where `150%+` lives** — same signal, true convexity: `$10` premium controls `$3000` notional → `2%` spot drop → `~200%` premium vs `6%` perp. We backtest both and execute on Derive options when live, perps as fallback.
+## Current Lanes
 
-### Best runs — 8-pair expanded universe (live Binance klines, 1h 60d, 1440 bars each, 800 $ start, fee 0.06% + 0.8% + 5bps, PIT 1-bar lag)
+| Lane | Venue | Purpose | Entry point |
+|---|---|---|---|
+| v3 testnet | Derive v3 testnet | Demonstrate auth, live data, Condor decisions, real testnet orders, and no-crash unsupported-symbol handling | `run_flyby_v3_testnet.py` |
+| v2 mainnet adapter | Hummingbot `derive` connector | Keep the Botcamp-compatible Hummingbot controller path | `controllers/directional_trading/flyby.py` |
+| Research/backtest | Binance candles + Derive public options data | Reproducible signal, SVI, Black76, WFA, and Guard evidence | `backtest/`, `src/` |
 
-| Rank | Pair | Surface | Thresh / CESF | Return | Ending | Trades | Win | DD | Sharpe* |
-|---|---|---|---|---|---|---|---|---|---|
-| 1 | **ARBUSDT** | perps | `2.0 / 0.35` | **+4.85%** | 839 | 43 | 47% | -4.31% | — |
-| 2 | **AVAXUSDT** | perps | `2.5 / 0.40` | **+2.89%** | 823 | 42 | 50% | **-0.83%** | — |
-| 3 | **ETHUSDT** | perps | `2.0 / 0.40` | **+2.56%** → **+4.62%** (`2.5/0.40` live) | 837 | 41 | **58.5%** | **-1.54%** | **1.65** |
-| 4 | SOLUSDT | perps | `2.5 / 0.40` | +1.63% | 813 | 45 | 51% | -1.41% | — |
-| — | **AVAXUSDT** | **options** `Black76 τ7d` | `2.5 / 0.40` | **+428%** | 4224 | 36 | 50% | -5.56% | — |
-| — | **BTCUSDT** | **options** | `2.0 / 0.40` | **+209%** | 2478 | 38 | 45% | -11% | — |
-| — | **Universe avg (8)** | perps | — | **+1.77%** (`6513/6400`) | — | — | — | — |
-| — | **Universe avg (8)** | **options** | — | **+152%** (`16173/6400`) | — | — | — | — |
+The v3 runner scans this native testnet universe by default:
 
-\*Industry-standard WFA (60/40 IS/OOS, PIT, no lookahead) for `ETH 1h 60d 2.5/0.40`: **IS 14.3% Sharpe 2.07 DD -1.4% → OOS 1.0% Sharpe 0.37 DD -0.4% → ALL 9.4% Sharpe 1.65 Sortino 0.65 Calmar 6.61** — OOS holds, not overfit. `ARB 1h ALL 59.5% Sharpe 2.39 / SOL 20.9% Sharpe 2.37`.
-
-**Timeframe contrast (ETH 60d, same 2.5/0.40):** `1m +0.83% 10tr` (under-trades) → `3m -7.34% 40tr DD -7.78%` (noisiest) → `5m +2.35% 44tr` → `15m -7.85%` → **`1h +4.62% 41tr DD -1.54% BEST`** → `4h +0.63% 18tr` (too slow). **Slow 1h wins for 48h finals** — 0.68 trades/day = `P&L + Volume` without churn.
-
-### Architecture — perps *and* options, same signal
-
-```
-Binance klines  ─┐
-Derive WS        ─┤→ HAR-RV (0.1·RVm+0.3·RVw+0.6·RVd) + EWMA λ=0.94 → σ_forecast, ε
-                  → SVI per expiry: w(k)=a+b·(ρ(k-m)+√((k-m)²+σ²)) → IV_ATM(k=0), IV_25Δ(k≈±0.3), skew
-                  → CESF crash-mass: tail(1.5σ)+kurt+cluster+ε → score [0,1]
-                  → Regime router (agents/condor_agent.py):
-                       CESF≥0.40 & skew>2 → OTM 25Δ put (TP1.8 SL0.55 48h) ← best when smile rich
-                       CESF≥0.35 & edge>2.5 vol → ATM put (TP1.2 SL0.48 24h) ← primary
-                       |mom 24×1h|>1.2% & CESF low → trend-ride call/put (TP1.0 12h)
-                  → Kelly trade: f*=½·edge/ε²·conf (conf=score/0.35), capped max_frac 0.05 / cap 0.08, $10 min
-                  → PortfolioGuard: gross 240, per-underlying 160, delta 40 vega 25 gamma 5, margin 25%, daily -3% peak -10% (no bypass)
-                  → Hummingbot PositionExecutor 3× leverage
-                       ├─► Derive perp (paper: binance_perpetual) — short perp = synthetic long put
-                       └─► Derive options (live) — long put/call via Black76(F,K,τ,r,vol) qty = notional/premium
+```text
+ETH-PERP,BTC-PERP,DOGE-PERP,ZEC-PERP,HYPE-PERP,SOL-PERP,BNB-PERP
 ```
 
-**Derive wiring:** `https://api.lyra.finance` `POST /public/get_all_instruments` → `POST /public/get_ticker` → `k=log(K/F)` `w=iv²τ` → `fit_svi_slice(τ,ks,ivs)` 600it butterfly `g≥0` + calendar no-arb → `iv_from_svi(k,τ)` → `Black76` — matches `bf-venue/src/derive.rs` `wss://api.lyra.finance/ws` (`spot_feed.{CCY}`, `orderbook.{inst}.1.10`). Verified live `ETH 20260911 τ0.003 n8 SVI a0.0008`.
+The current testnet subaccount can execute risk-universe-1 instruments such as ETH/BTC. Some other symbols may be rejected by Derive for that subaccount’s risk universe; the runner disables those instruments after the first rejection and keeps running.
 
-### How the backtest is made
+Derive testnet liquidity can be thin. Treat the v3 run as proof of authentication, market scanning, order creation, live status, and fault-tolerant execution; production liquidity remains the Hummingbot V2 mainnet lane.
 
-**Perps proxy** (`backtest/run_backtest.py`): `close → log rets → HAR+EWMA → CESF → edge = σ - 20d RV → short perp 3×` (1-bar PIT lag: signal at close `i` → fill at open `i+1`, fees+slippage). Fast, no expiry — tuned `1h`.
+## Quick Start — Derive v3 Testnet
 
-**Options** (`src/pricing/black76.py` + `backtest/run_expanded.py`): `F=spot, K=F (ATM) or 0.97·F (OTM), τ=7d, r=0, premium=Black76(F,K,τ,r,IV_SVI_ATM)` → `premium_now=Black76(F_now,K,τ-rem, r, σ_forecast)` → `PnL=(premium_now-premium_entry)·qty - fees`, `qty=(equity·f*)/premium_entry`. True convexity → `1.77% → 152%` on same signal.
+```bash
+cp .env.example .env
+# fill DERIVE_SESSION_KEY, DERIVE_WALLET, DERIVE_SUBACCOUNT_ID, DERIVE_ETH_CHAIN
+bash scripts/start_flyby_v3_testnet.sh
+bash scripts/flyby_v3_status.sh
+```
 
-**Industry-standard harness** (`backtest/harness.py` + `run_standard.py`): `PIT 1-bar lag, no lookahead, WFA 60/40 IS/OOS, survivorship fixed, Guard` → metrics `CAGR Sharpe Sortino Calmar maxDD VaR95 hit PF`. See `backtest/standard_wfa.png`.
+Useful overrides:
 
-### Quick start
+```bash
+EXTRA_ARGS="--allow-default-orders" bash scripts/start_flyby_v3_testnet.sh
+CONTAINER=hb-derive-py ENV_FILE=.env bash scripts/flyby_v3_status.sh
+```
+
+Artifacts:
+
+```text
+hb_backtest/flyby_v3_testnet.jsonl
+/tmp/flyby_v3_testnet.log inside the container
+```
+
+## Quick Start — Research and Backtests
 
 ```bash
 pip install -r requirements.txt
 
-# Perps proxy (honest, Guard-capped)
+# Guarded perps proxy
 python backtest/run_backtest.py --pair ETHUSDT --interval 1h --days 60 --thresh 2.5 --cesf_min 0.40 --plot
-# → ETH 1h +4.62% 41tr 58.5% win -1.54% DD
 
-# Live Kelly sweep (81 combos)
-PYTHONPATH=. python backtest/run_kelly_sweep.py --pair ETHUSDT --interval 1h --days 60
+# Expanded universe, options pricing, and plots
+PYTHONPATH=. python backtest/run_expanded.py
 
-# Expanded 8-pair + options + plots
-PYTHONPATH=. python backtest/run_expanded.py  # → expanded_results.csv + heatmap.png + confusion.png + equity.png + options_vs_perps.png
+# Point-in-time WFA harness
+PYTHONPATH=. python backtest/run_standard.py --pair ETHUSDT --interval 1h --days 60
 
-# Industry-standard WFA (PIT, no peeking)
-PYTHONPATH=. python backtest/run_standard.py --pair ETHUSDT --interval 1h --days 60  # → IS 14.3% → OOS 1.0% → ALL 9.4%
-
-# Live Derive SVI snapshot
+# Derive public SVI snapshot
 PYTHONPATH=. python src/venue/derive.py
+
+# Condor decision demo
+python -c "from agents.condor_agent import condor_options_demo; print(condor_options_demo())"
 ```
 
-**Hummingbot V2:**
+## Quick Start — Hummingbot V2 Mainnet Adapter
+
 ```bash
-cp controllers/directional_trading/derive_cesf_long_vol.py <hummingbot>/controllers/directional_trading/
+cp controllers/directional_trading/flyby.py <hummingbot>/controllers/directional_trading/
 cp conf/controllers/*.yml <hummingbot>/conf/controllers/
 cp conf/scripts/*.yml <hummingbot>/conf/scripts/
-# CLI: create --controller-config directional_trading.derive_cesf_long_vol; start --v2 conf_v2_derive_cesf.yml
 ```
 
-**Condor Agent lane:** `agents/condor_agent.py` `decide(snapshot)→AgentDecision` picks `regime/thresh` within `BANDS 1.5–2.8 / 0.30–0.50`, never prices. `v2_with_controllers` + Condor (`condor.hummingbot.org`).
+Then in Hummingbot:
 
-### Layout
-
-```
-controllers/directional_trading/derive_cesf_long_vol.py  # V2 controller (SVI+OTM/ATM+Kelly+Guard, PIT)
-src/svi/            # SVI params, fit, calendar/butterfly
-src/forecast/       # HAR-RV + EWMA
-src/pricing/        # Black76 (perps + options)
-src/kelly/          # trade Kelly + portfolio
-src/regimes/        # ATM/OTM/trend/VRP catalog
-src/risk/           # PortfolioGuard
-src/venue/          # live Derive fetcher (Lyra API)
-agents/condor_agent.py
-backtest/           # run_backtest / run_kelly_sweep / run_expanded / run_standard + harness + plots
-conf/               # 4-agent universe (eth/arb/sol/avax 1h) + v2 script
-strategy.md         # Botcamp submission (with heatmap/confusion/equity/options_vs_perps/standard_wfa)
+```text
+create --controller-config directional_trading.flyby
+start --v2 conf_v2_flyby.yml
 ```
 
-### Plots
+## Strategy Snapshot
 
-| Heatmap (thresh × cesf, ETH 1h) | Confusion (signal vs 24h fwd) | Equity (top 3 perps) | Options vs Perps |
-|---|---|---|---|
-| ![Heatmap](backtest/heatmap.png) | ![Confusion](backtest/confusion.png) | ![Equity](backtest/equity.png) | ![Options vs Perps](backtest/options_vs_perps.png) |
+| Layer | Implementation |
+|---|---|
+| Forecast | HAR-RV + EWMA λ=0.94 |
+| Surface | SVI per expiry with no-arb checks |
+| Pricing | Black76 options pricing |
+| Event filter | CESF crash-mass proxy: tail, kurtosis, clustering, forecast disagreement |
+| Decision | Condor `decide(snapshot)` selects OTM, ATM, trend, or strangle regime |
+| Sizing | Half-Kelly from edge and uncertainty |
+| Guard | Gross, per-underlying, delta, vega, gamma, margin, daily loss, and peak loss limits |
+| Execution | Derive option where supported; Derive perp fallback/proof lane |
 
-WFA: ![WFA](backtest/standard_wfa.png)
+## Backtest Summary
 
-### Botcamp
+Backtests use live Binance klines as proxy history, 1h candles, $800 start, fees and slippage, one-bar point-in-time lag, 60/40 WFA, and Guard enabled.
 
-Team **Derive** · Agent **Flyby** — https://www.botcamp.xyz/dashboard/hackathons/agent-builders-cup-1 — link `https://github.com/David-glitc/flyby` (was `derive-cesf-botcamp`) + `strategy.md`. Freeze **Sep 30**, finals **Oct 1–2** (48h, `$800`/agent, `P&L+Volume+HBOT`).
+| Surface | Result |
+|---|---|
+| Perps proxy | ETH 1h 60d positive guarded run, low drawdown |
+| Options model | Same signal becomes convex through Black76/SVI options pricing |
+| WFA | OOS remains positive in the documented ETH 1h run |
 
-> **Bottom line:** `Perps = +4.62% ETH (honest, Guard DD -1.54%)`, `Options = +152% avg / +428% best (Derive native)` — same edge, different leverage. Ship `1h` slow candles, `4-agent` universe (`ETH/ARB/SOL/AVAX`), `Derive options` live → `10%+`.
+The detailed table and plots are in [`strategy.md`](strategy.md).
 
----
-*CESF ε=0.088 H=42 barrier 0.80 · SVI butterfly/calendar no-arb · Kelly half + Guard (no bypass) · PIT WFA 60/40.*
+## Repository Layout
+
+```text
+agents/                         Condor agent decision logic
+controllers/directional_trading/ Hummingbot V2 controller
+conf/                           Hummingbot controller and script configs
+run_flyby_v3_testnet.py          Derive v3 testnet runner
+scripts/                        Start/status scripts
+src/svi/                        SVI surface fitting
+src/forecast/                   HAR-RV + EWMA
+src/pricing/                    Black76 pricing
+src/risk/                       PortfolioGuard
+src/collateral/                 Multi-collateral model
+src/venue/                      Derive public data helpers
+backtest/                       Backtest and WFA harnesses
+hb_backtest/                    Testnet and proof artifacts
+```
+
+## Botcamp Context
+
+Official/public material for the Agent Builders Cup describes $800 starting capital, Hummingbot V2 Controller or Condor Agent eligibility, sponsor teams including Derive, a 48h finals format, and public ranking surfaces including volume, P&L, and HBOT vote.
+
+Flyby’s submission answer is: Derive-native volatility and options edge, deterministic risk controls, and a live v3 testnet proof path that does not disturb the V2 mainnet adapter.

@@ -9,3 +9,6 @@ venv/
 data/
 __pycache__/
 *.pyc
+.env*
+!.env.example
+testnet_scaffold/.env*

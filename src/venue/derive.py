@@ -10,12 +10,15 @@ No keys needed for public data. For Hummingbot, connector_name=derive handles au
 This module is for backtest/research SVI calibration — live Hummingbot controller uses same endpoints via MarketDataProvider.
 """
 from __future__ import annotations
-import time, math
+import os, time, math
 from typing import List, Dict, Any
 import requests
 
 HTTP_MAINNET = "https://api.lyra.finance"
 FALLBACKS = ["https://api.lyra.finance", "https://api-demo.lyra.finance"]
+# If DERIVE_DOMAIN=testnet, FALLBACKS is reversed so testnet is tried first.
+if os.environ.get("DERIVE_DOMAIN") == "testnet":
+    FALLBACKS = ["https://api-demo.lyra.finance", "https://api.lyra.finance"]
 
 def _post(path: str, payload: dict, timeout=12) -> dict:
     last=None
