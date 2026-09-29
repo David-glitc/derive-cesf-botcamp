@@ -1,5 +1,6 @@
-# Flyby — Derive CESF — BTC 1h fallback (Derive BTC-PERP + BTC options, multi-collateral BTC 15%)
-# Venue: Derive — BTC-PERP + BTC-YYYYMMDD-K-C/P options (Black76/SVI), portfolio margin net BTC/ETH
+# Flyby competition profile — BTC perpetual fallback market.
+# Options are eligible for research/testnet only until the installed
+# Derive/Hummingbot adapter proves first-class option execution.
 id: flyby-btc-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
@@ -25,8 +26,8 @@ executor_refresh_time: 20
 kelly_cap: 0.08
 max_fraction: 0.05
 regime: auto
-collateral_asset: multi
-portfolio_margin: true
-options_enabled: true
-spot_hedge_enabled: true
+collateral_asset: USDC
+portfolio_margin: false
+options_enabled: false
+spot_hedge_enabled: false
 candles_config: []

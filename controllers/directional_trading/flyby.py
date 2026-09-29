@@ -1,29 +1,24 @@
 """
-Flyby — Derive CESF (Causal Event Space Framework) · Crash-Mass Long Vol (Botcamp — Derive)
-FULL STACK: SVI surface + OTM/ATM + Trend + Kelly trade+portfolio + Condor (CESF proxy)
-             + Derive MULTI-COLLATERAL + Derive PORTFOLIO MARGIN
+Flyby — Derive CESF (Causal Event Space Framework) · competition profile.
+
+The checked-in live profile is perpetual-first and capability-gated. The
+controller consumes Hummingbot/Derive data and emits Hummingbot executor
+configs; it does not place direct venue orders or claim unverified options,
+multi-collateral, or portfolio-margin execution.
 
 Standalone V2 controller, no private deps. Hummingbot-native.
-Venue: Derive — spot + perps (ETH-PERP, BTC-PERP, SOL-PERP) + OPTIONS (Derive native)
-       Candle feed: Derive WS (spot_feed.{CCY} + orderbook.{inst}.1.10) with Binance klines fallback for backtest.
+Venue: Derive perpetuals through the Hummingbot adapter.
+       Candle feed: adapter-provided data, with Binance klines only for research.
 
 Edge stack:
   1) SVI surface per expiry → IV(K) for ATM (k=0) and 25Δ wings (k≈±0.3)  [src/svi]
   2) HAR-RV + EWMA ensemble → forecast_sigma, epsilon                     [src/forecast]
   3) CESF crash-mass → score [0,1]                                        [src/regimes]
-  4) Kelly trade sizing + PortfolioGuard (Derive portfolio margin)         [src/risk + src/collateral]
+  4) Kelly trade sizing + local risk admission                              [src/risk]
 
-Derive scoring bonuses covered:
-  ✓ Spot/Perp — connector_name=derive, trading_pair ETH-PERP (or ETH-USDC spot for collateral hedge)
-  ✓ Options via Condor — SVI (Lyra API) → Black76(F,K,τ,r,vol_SVI) → long 25Δ put τ7d via Condor decide()
-    execution: OTM regimes route to Derive options instruments (ETH-YYYYMMDD-K-C/P) when live,
-               perp 3× short is synthetic fallback for paper/backtest. Same signal, true convexity.
-  ✓ Multi-collateral — src/collateral/multi_collateral.py vault post ETH/BTC/HYPE/kHYPE/USDC
-    with haircuts (ETH 10%, HYPE 15%...) → effective_collateral vs USDC-only 40-60% margin unlock.
-    Controller logs chosen collateral + rebalance hint (Derive spot ETH/USDC).
-  ✓ Portfolio margin — src/risk/portfolio_guard.py net delta/vega/gamma offsets,
-    margin = 10% gross + vega add (vs 50% isolated). Cross-position: long spot + short perp + long put
-    net -0.25Δ vs gross 1.05Δ → ~60% less margin, ~2.4× capital efficiency.
+Capabilities such as options, multi-collateral, and portfolio margin are
+research/testnet surfaces until the installed adapter reports them and the
+contract tests prove their lifecycle.
 
 Regimes (src/regimes/catalog.py):
   - scalp-long-put-atm      | ATM put  | edge>1.8 vol & CESF≥0.35 → Derive PERP short or ATM put option (primary +24%)
@@ -32,10 +27,9 @@ Regimes (src/regimes/catalog.py):
   - strangle-long-otm       | 25Δ strangle | both wings cheap
   - trend-ride-*/put        | ATM call/put | momentum 24×1h >1.2% + vol filter
 
-Risk: 1 position at a time, TP 1.2/1.8 (OTM) SL 0.48/0.55, time 24h/48h, leverage 3×
-      Kelly 0.05/0.08 (trade), PortfolioGuard Derive: gross 240, per-underlying 160,
-      delta 40 vega 25 gamma 5, margin 25% (portfolio, not isolated), daily -3% peak -10%
-      Multi-collateral vault: USDC 40% + ETH 30% + BTC 15% + HYPE 10% + kHYPE 5%
+Risk: 1 position at a time, configurable stop/take-profit/time limits, and
+      adapter-reported account/margin state. Local limits are not a substitute
+      for Hummingbot/Derive risk controls.
 
 Usage:
   create --controller-config directional_trading.derive_cesf_long_vol
@@ -99,17 +93,23 @@ def _derive_option_instrument(ccy: str, expiry_yyyymmdd: str, strike: int, kind:
     return f"{ccy}-{expiry_yyyymmdd}-{strike}-{kind}"
 
 def _collateral_choice_hint(collateral_cfg: str = "multi") -> str:
-    """Human hint for logs — real vault is src/collateral/multi_collateral.py."""
-    return "USDC 40% + ETH 30% + BTC 15% + HYPE 10% + kHYPE 5% (haircuts 0/10/10/15/15%)"
+    """Return a truthful, non-authoritative log hint."""
+    if str(collateral_cfg).upper() == "USDC":
+        return "USDC (adapter-reported account state)"
+    return "configured collateral requires adapter verification"
 
 class DeriveCesfLongVolConfig(DirectionalTradingControllerConfigBase):
     controller_name: str = "derive_cesf_long_vol"
     controller_type: str = "directional_trading"
     candles_connector: str = Field(default=None)
     candles_trading_pair: str = Field(default=None)
+    candles_config: list = Field(default_factory=list)
     interval: str = Field(default="1h")
     vol_lookback: int = Field(default=100)
     iv_threshold_vol: float = Field(default=2.5)
+    cesf_epsilon: float = Field(default=0.088)
+    cesf_barrier: float = Field(default=0.80)
+    executor_refresh_time: int = Field(default=20)
     cesf_min_score: float = Field(default=0.35)
     svi_skew_threshold: float = Field(default=2.0, json_schema_extra={"prompt":"OTM trigger: put25Δ IV - call25Δ IV > this (vol pts): "})
     kelly_cap: float = Field(default=0.08)
@@ -120,11 +120,11 @@ class DeriveCesfLongVolConfig(DirectionalTradingControllerConfigBase):
     stop_loss: float = Field(default=0.48)
     take_profit: float = Field(default=1.2)
     time_limit: int = Field(default=86400)
-    # ── Derive bonus knobs (scoring) ──────────────────────────
-    collateral_asset: str = Field(default="multi", json_schema_extra={"prompt":"Collateral: multi (ETH/BTC/HYPE) or USDC: "})
-    portfolio_margin: bool = Field(default=True, json_schema_extra={"prompt":"Use Derive portfolio margin (net delta/vega offsets)? "})
-    options_enabled: bool = Field(default=True, json_schema_extra={"prompt":"Route OTM regimes to Derive OPTIONS (else perp synthetic)? "})
-    spot_hedge_enabled: bool = Field(default=True, json_schema_extra={"prompt":"Hedge drift on Derive SPOT (multi-collateral rebalance)? "})
+    # ── Adapter capability gates ─────────────────────────────
+    collateral_asset: str = Field(default="USDC", json_schema_extra={"prompt":"Collateral reported by the adapter: "})
+    portfolio_margin: bool = Field(default=False, json_schema_extra={"prompt":"Use adapter-verified portfolio margin? "})
+    options_enabled: bool = Field(default=False, json_schema_extra={"prompt":"Use adapter-verified option instruments? "})
+    spot_hedge_enabled: bool = Field(default=False, json_schema_extra={"prompt":"Use adapter-verified spot hedge? "})
     condor_active: bool = Field(default=False, json_schema_extra={"prompt":"Condor ACTIVE mode (+80% volume, strangle/reversion)? "})
 
     @field_validator("candles_connector", mode="before")
@@ -202,13 +202,13 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
                 signal=1; regime="otm-call-25d"; venue="derive-options" if self.config.options_enabled else "derive-perp"
         else:
             if self.config.regime=="atm" and score>=self.config.cesf_min_score and edge>self.config.iv_threshold_vol/100: signal=-1; regime="atm-put"; venue="derive-perp"
-            elif self.config.regime=="otm" and skew>2.0 and edge>0.015: signal=-1; regime="otm-put-25d"; venue="derive-options"
+            elif self.config.regime=="otm" and skew>2.0 and edge>0.015:
+                signal=-1; regime="otm-put-25d"; venue="derive-options" if self.config.options_enabled else "derive-perp"
 
-        # ── Derive portfolio-margin + multi-collateral hints for logs ──
-        # Portfolio margin: gross 240, but net delta/vega/gamma offsets → 60% less margin than isolated
-        # Multi-collateral: ETH 30% + BTC 15% + HYPE 10% + kHYPE 5% + USDC 40% (haircuts 10/10/15/15/0)
+        # Record capability state for the adapter boundary; do not infer it
+        # from research models or from the presence of a config key.
         collateral_hint = _collateral_choice_hint(self.config.collateral_asset)
-        pm_hint = "portfolio(net Δ/ν/Γ, 10% gross + vega add)" if self.config.portfolio_margin else "isolated(50% gross)"
+        pm_hint = "adapter-verified portfolio margin" if self.config.portfolio_margin else "adapter-reported margin"
         # Options execution hint: derive instrument name for 7d 25Δ put
         ccy = self.config.trading_pair.split("-")[0].split("/")[0] if "-" in self.config.trading_pair or "/" in self.config.trading_pair else "ETH"
         opt_hint = _derive_option_instrument(ccy, "7d(nearest)", int(closes[-1]*0.97), "P") if "otm" in regime else "ATM"
@@ -222,13 +222,12 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
             cesf_score=float(score), edge=float(edge), iv_proxy=float(recent),
             atr=float(atr), momentum=float(mom), skew=float(skew),
             kelly_frac=float(f_half*conf),
-            collateral=_collateral_choice_hint(), collateral_asset=self.config.collateral_asset,
+            collateral=collateral_hint, collateral_asset=self.config.collateral_asset,
             portfolio_margin=self.config.portfolio_margin, pm_model=pm_hint,
             spot_hedge=self.config.spot_hedge_enabled,
-            fees="0.06%+0.8% half-spread",
+            fees="adapter-reported fees + estimated spread/slippage",
             derive_perp=_derive_perp_instrument(ccy),
-            # Documentation for judges: multi-collateral + portfolio margin + options all live
-            derive_bonuses="spot/perp ✓  options(via Condor/SVI/Black76) ✓  multi-collateral(ETH/BTC/HYPE) ✓  portfolio-margin(net offsets) ✓",
+            capabilities="options/multi-collateral/portfolio-margin are capability-gated",
         ))
 
     def get_executor_config(self, trade_type: TradeType, price: Decimal, amount: Decimal):
@@ -238,12 +237,9 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
         tp=1.8 if "otm" in regime else self.config.take_profit
         sl=0.55 if "otm" in regime else self.config.stop_loss
         tl=172800 if "otm" in regime else self.config.time_limit
-        # Derive instrument: perps use ETH-PERP, options would use ETH-YYYYMMDD-K-P limit order
-        # PositionExecutor is perp-native; Derive options orders are placed via same connector
-        # with instrument_name option (controller logs derive_option_hint for execution).
-        # Portfolio margin & multi-collateral are enforced by src/risk/portfolio_guard.py +
-        # src/collateral/multi_collateral.py — PositionExecutor amount is already Kelly-sized
-        # and Guard caps gross/delta/vega/gamma before fill.
+        # PositionExecutorConfig is used only for the verified live instrument
+        # path. Options require a separate adapter/executor contract and are
+        # therefore not represented by this default perp executor.
         return PositionExecutorConfig(
             timestamp=self.market_data_provider.time(),
             connector_name=self.config.connector_name,  # must be "derive" for scoring

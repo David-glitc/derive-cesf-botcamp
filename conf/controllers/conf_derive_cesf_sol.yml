@@ -1,5 +1,4 @@
-# Flyby — Derive CESF — SOL 1h (WFA ALL 20.9% CAGR Sharpe 2.37 DD -1.5%)
-# Venue: Derive — SOL-PERP + SOL options (25Δ wings cheap when SVI skew >2)
+# BACKTEST/legacy profile — use conf_flyby_sol.yml for competition setup.
 id: flyby-sol-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
@@ -25,8 +24,8 @@ take_profit: 1.2
 time_limit: 86400
 cooldown_time: 120
 executor_refresh_time: 20
-collateral_asset: multi
-portfolio_margin: true
-options_enabled: true
-spot_hedge_enabled: true
+collateral_asset: USDC
+portfolio_margin: false
+options_enabled: false
+spot_hedge_enabled: false
 candles_config: []

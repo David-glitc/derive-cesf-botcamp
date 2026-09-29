@@ -1,7 +1,9 @@
-"""Condor harness — Botcamp Agent lane wrapper over the V2 controller.
+"""Condor harness — bounded Agent lane policy over the V2 controller.
 
-Derive SCORING EDITION — explicitly uses Derive options data + execution (bonus),
-multi-collateral + portfolio margin.
+The policy is venue-agnostic and capability-gated. It can reason about
+options research features, but it only advertises an options route when the
+normalized Hummingbot/Derive snapshot explicitly says that option discovery
+and execution are available.
 
 Condor is the LLM-driven harness (https://condor.hummingbot.org) that
 reasons about market conditions and supervises deterministic executors.
@@ -13,16 +15,17 @@ It only:
   - halts if data stale or risk guard tripped
 
 Deterministic stack that DOES price/execute:
-  - src/venue/derive.py : POST /public/get_all_instruments + /public/get_ticker → w=iv²τ
+  - src/venue/derive.py : public research data only
   - src/svi/fit.py       : fit_svi_slice(τ, ks, ivs) 600it butterfly+calendar → iv_from_svi(k)
   - src/pricing/black76.py: Black76(F,K,τ,r,vol) → premium, delta, vega, gamma
-  - src/collateral/multi_collateral.py: ETH/BTC/HYPE/kHYPE vault → effective_collateral
-  - src/risk/portfolio_guard.py: Derive portfolio margin net Δ/ν/Γ (vs isolated)
+  - src/collateral/multi_collateral.py: research collateral model
+  - src/risk/portfolio_guard.py: local risk model; live margin is adapter-reported
 
 This file makes your submission valid for BOTH lanes:
   - Controller lane: submit controller directly (derive_cesf_long_vol.py)
   - Agent lane: submit this Condor agent + same controller
-Scoring: spot/perp (ETH-PERP) + options via Condor routines + multi-collateral + portfolio margin = all 4 bons.
+Live scoring claims are made only after the installed adapter and deployment
+tests prove the relevant capability.
 """
 from __future__ import annotations
 import json, time, math
@@ -30,7 +33,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 # ── Derive options stack (Condor routines) ───────────────────────
-# These are the exact imports Condor uses alongside perps — judges see options data+execution
+# Optional research imports. Live execution remains inside the adapter.
 try:
     from src.svi.fit import fit_svi_slice  # noqa
     from src.pricing.black76 import black76_price, black76_delta  # noqa
@@ -78,7 +81,7 @@ If daily loss <-2% or stale >60s → HALT
 # Same logic but thresh 1.2 vs 1.5, cesf 0.25 vs 0.30, mom 0.8% vs 1.2%
 # + NEW: strangle-long-otm (both wings cheap, vol expansion bet) → OTM put+call
 # + NEW: scalp-reversion (high eps + low CESF, mean-reversion long call)
-# + NEW: derive spot rebalance when collateral drift >8% (multi-collateral)
+# + NEW: optional spot rebalance research path; live use requires adapter proof
 # Expected: ~1.2-1.5 tr/day (+80%), Guard still holds DD -2.5%, extra volume wins finals.
 """
 
@@ -93,8 +96,7 @@ def _derive_option_execution_hint(snapshot: dict, regime: str) -> tuple[str, str
         inst = f"{ccy}-7d-{K}-P(25Δ) → {_derive_instrument(ccy, K, 'P')}"
         return "derive-options", inst
     if regime == "scalp-long-put-atm":
-        inst = f"{ccy}-PERP(synthetic long put) or {ccy}-ATM-P(Black76, τ7d)"
-        return "derive-perp", inst
+        return "derive-perp", f"{ccy}-PERP"
     return "derive-perp", f"{ccy}-PERP"
 
 def _derive_instrument(ccy: str, strike: int, kind: str) -> str:
@@ -106,8 +108,8 @@ def decide(market_snapshot: dict, active: bool = False) -> AgentDecision:
 
     Condor lane: this IS the Derive options routine. It reads SVI skew (from
     src/venue/derive.py + src/svi/fit.py) and routes OTM wings to Derive options
-    via Black76 (src/pricing/black76.py), alongside perps, with multi-collateral
-    + portfolio margin guard (src/collateral + src/risk).
+    via Black76 (src/pricing/black76.py), alongside perp research, with local
+    collateral/risk diagnostics. Live use requires explicit adapter capability.
 
     active=False: conservative 60d-tuned (0.68 tr/day, DD -1.5%) — current submission.
     active=True : finals 48h aggressive (+80% volume, DD -2.5% still guarded) — pick this for volume scoring.
@@ -119,6 +121,7 @@ def decide(market_snapshot: dict, active: bool = False) -> AgentDecision:
     stale = market_snapshot.get("stale_secs", 0)
     daily_pnl = market_snapshot.get("daily_pnl_pct", 0)
     eps = market_snapshot.get("epsilon", 0.03)
+    options_capable = bool(market_snapshot.get("options_capable", False))
 
     halt_thresh = -0.03 if not active else -0.04  # active allows -4% daily before halt (more action)
     if stale > 60 or daily_pnl <= halt_thresh:
@@ -134,67 +137,68 @@ def decide(market_snapshot: dict, active: bool = False) -> AgentDecision:
     mom_thr = 0.012 if not active else 0.008
 
     # ── ACTIVE NEW REGIME: strangle when both wings cheap + vol expansion ──
-    if active and cesf < 0.28 and edge > 0.016 and eps > 0.04 and abs(skew) < 1.0:
+    if options_capable and active and cesf < 0.28 and edge > 0.016 and eps > 0.04 and abs(skew) < 1.0:
         venue, inst = _derive_option_execution_hint(market_snapshot, "strangle-long-otm")
         return AgentDecision("strangle-long-otm", 1.5, 0.28,
                              f"STRANGLE OTM: vol expansion eps {eps:.3f} edge {edge:.3f} skew {skew:.1f} → {venue} put+call 25Δ",
                              execution_venue="derive-options", derive_instrument=inst,
-                             collateral_hint="post HYPE/kHYPE + ETH (multi-collateral strangle)",
-                             margin_model="Derive portfolio margin: long strangle wings offset ~50%")
+                             collateral_hint="adapter-reported collateral",
+                             margin_model="adapter-verified margin required")
 
     # OTM put 25Δ → Derive OPTIONS (bonus scoring: Condor options alongside perps)
-    if cesf >= otm_cesf and skew > otm_skew and edge > otm_edge:
+    if options_capable and cesf >= otm_cesf and skew > otm_skew and edge > otm_edge:
         venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-put-otm-25d")
         kelly_note = " Kelly 1.5×" if active else ""
         return AgentDecision("scalp-long-put-otm-25d", 1.8 if not active else 1.5, 0.40 if not active else 0.33,
                              f"OTM put: cesf {cesf:.2f} skew {skew:.1f} edge {edge:.3f} → {venue} {inst} Black76 τ7d SVI{kelly_note}",
                              execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="post ETH 30% + HYPE 10% (multi-collateral, haircut 10/15%)",
-                             margin_model="Derive portfolio margin: net Δ/ν offset (~60% less vs isolated)")
+                             collateral_hint="adapter-reported collateral",
+                             margin_model="adapter-verified margin required")
     if cesf >= atm_cesf and edge > atm_edge:
         venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-put-atm")
         return AgentDecision("scalp-long-put-atm", 2.5 if not active else 2.0, 0.35 if not active else 0.27,
                              f"ATM put: cesf {cesf:.2f} edge {edge:.3f} → {venue} {inst}",
                              execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="USDC 40% + ETH/BTC 45% (multi-collateral)",
-                             margin_model="Derive portfolio margin net Δ 40 cap")
+                             collateral_hint="adapter-reported collateral",
+                             margin_model="adapter-reported margin")
     if mom > mom_thr and cesf < (0.30 if not active else 0.35):
         return AgentDecision("trend-ride-call", 1.8, 0.30, f"trend call: mom {mom:.3f} ({'active 0.8%' if active else 'cons 1.2%'})",
-                             execution_venue="derive-perp/spot", collateral_hint="post HYPE/kHYPE",
-                             margin_model="portfolio margin: spot long + perp hedge offset")
+                             execution_venue="derive-perp/spot", collateral_hint="adapter-reported collateral",
+                             margin_model="adapter-reported margin")
     if mom < -mom_thr and cesf < (0.30 if not active else 0.35):
         return AgentDecision("trend-ride-put", 1.8, 0.30, f"trend put: mom {mom:.3f}",
-                             execution_venue="derive-perp", collateral_hint="post ETH/BTC",
-                             margin_model="portfolio margin net short delta")
+                             execution_venue="derive-perp", collateral_hint="adapter-reported collateral",
+                             margin_model="adapter-reported margin")
     # Mean-reversion scalp when vol stretched but no crash
-    if active and cesf < 0.32 and edge > 0.010 and eps > 0.035:
+    if options_capable and active and cesf < 0.32 and edge > 0.010 and eps > 0.035:
         venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-call-otm-25d")
         return AgentDecision("scalp-long-call-otm-25d", 1.5, 0.27,
                              f"SCALP call: mean-rev eps {eps:.3f} edge {edge:.3f} cesf {cesf:.2f} → {venue}",
                              execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="multi-collateral ETH/BTC/HYPE",
-                             margin_model="portfolio margin scalp wings offset")
+                             collateral_hint="adapter-reported collateral",
+                             margin_model="adapter-verified margin required")
 
-    if cesf < 0.25 and edge > 0.022:
+    if options_capable and cesf < 0.25 and edge > 0.022:
         venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-call-otm-25d")
         return AgentDecision("scalp-long-call-otm-25d", 2.2, 0.30, f"OTM call expansion → {venue} {inst}",
                              execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="multi-collateral ETH/BTC/HYPE",
-                             margin_model="portfolio margin strangle wings offset")
+                             collateral_hint="adapter-reported collateral",
+                             margin_model="adapter-verified margin required")
     # ACTIVE fallback: still take more trades when edge modest
     if active and edge > 0.008 and cesf >= 0.25:
         venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-put-atm")
         return AgentDecision("scalp-long-put-atm", 1.5, 0.25,
                              f"ACTIVE fallback ATM: edge {edge:.3f} cesf {cesf:.2f} → {venue}",
                              execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="multi-collateral vault active",
-                             margin_model="Derive portfolio margin active")
+                             collateral_hint="adapter-reported collateral",
+                             margin_model="adapter-reported margin")
     # default ATM put — still Derive perp (spot/perp requirement satisfied)
     venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-put-atm")
-    return AgentDecision("scalp-long-put-atm", 2.0, 0.35, "default ATM put → derive perp + options fallback",
-                         execution_venue=venue, derive_instrument=inst,
-                         collateral_hint="multi-collateral vault (src/collateral)",
-                         margin_model="Derive portfolio margin (src/risk)")
+    return AgentDecision("scalp-long-put-atm", 2.0, 0.35,
+                         "default ATM put → derive perp (options capability unavailable)",
+                         execution_venue="derive-perp", derive_instrument=f"{market_snapshot.get('ccy', 'ETH')}-PERP",
+                         collateral_hint="adapter-reported collateral",
+                         margin_model="adapter-reported margin")
 
 def decide_active(snapshot: dict) -> AgentDecision:
     """Shorthand for finals — 48h volume mode."""
@@ -202,12 +206,12 @@ def decide_active(snapshot: dict) -> AgentDecision:
 
 # ── Explicit Condor options demonstration (for judges/video) ──────
 def condor_options_demo(spot: float = 3000, ccy: str = "ETH") -> dict:
-    """Run the full Derive options stack in one call — proves Condor uses Derive options data/execution.
+    """Run the research-only options stack in one call.
 
-    1. fetch_svi_inputs(ccy) → w=iv²τ points from Derive orderbook mids
+    1. fetch_svi_inputs(ccy) → w=iv²τ points from public Derive data
     2. fit_svi_slice(τ, ks, ivs) → SVI params a,b,ρ,m,σ with butterfly+calendar
     3. black76_price(F,K,τ,r,vol_SVI) → OTM 25Δ put premium + greeks
-    4. CollateralVault + PortfolioGuard → multi-collateral + portfolio margin check
+    4. local collateral/risk models → research diagnostics only
     """
     if not _DERIVE_STACK:
         return {"ok": False, "reason": "stack not importable (run PYTHONPATH=. )"}
@@ -227,9 +231,9 @@ def condor_options_demo(spot: float = 3000, ccy: str = "ETH") -> dict:
         return {"ok": True, "iv_atm": round(iv_atm,3), "iv_otm": round(iv_otm,3),
                 "prem_atm": round(prem_atm,2), "prem_otm": round(prem_otm,2),
                 "svi": f"a={p.a:.4f} b={p.b:.3f} ρ={p.rho:.2f} rmse={rmse:.4f}",
-                "venue": "derive-options via Condor (Black76 τ7d, SVI)",
-                "collateral": "ETH/BTC/HYPE multi (10/10/15% haircut)",
-                "margin": "portfolio net Δ/ν offsets"}
+                "venue": "research-only options model (Black76 τ7d, SVI)",
+                "collateral": "research model only",
+                "margin": "adapter capability required for live margin"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

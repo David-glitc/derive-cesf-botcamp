@@ -4,11 +4,23 @@ __pycache__/
 .venv/
 venv/
 .env
-*.log
-.DS_Store
-data/
-__pycache__/
-*.pyc
 .env*
 !.env.example
 testnet_scaffold/.env*
+*.log
+.DS_Store
+data/
+
+# Local trading/runtime state. Keep credentials, account snapshots, raw fills,
+# and operational logs out of the public repository.
+runtime/
+private/
+ops/
+account_snapshots/
+ledger_exports/
+live_logs/
+testnet_logs/
+*.account.json
+*.fills.jsonl
+*.private.json
+*.secret.json

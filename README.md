@@ -139,3 +139,24 @@ hb_backtest/                    Testnet and proof artifacts
 Official/public material for the Agent Builders Cup describes $800 starting capital, Hummingbot V2 Controller or Condor Agent eligibility, sponsor teams including Derive, a 48h finals format, and public ranking surfaces including volume, P&L, and HBOT vote.
 
 Flyby’s submission answer is: Derive-native volatility and options edge, deterministic risk controls, and a live v3 testnet proof path that does not disturb the V2 mainnet adapter.
+
+## Competition Safety Contract (V2 Mainnet Lane)
+
+The V2 competition profile is intentionally conservative:
+
+- Venue boundary: the Hummingbot Derive adapter owns data, trading rules, orders, fills, balances, positions, fees, and funding. The Condor policy selects a bounded regime from a normalized snapshot; executors place orders.
+- Live perpetual candidates: `ETH-PERP`, `BTC-PERP`, `SOL-PERP`, `HYPE-PERP`, subject to adapter discovery and minimum-order rules.
+- Options disabled by default; ETH/BTC eligibility only after first-class adapter capability tests.
+- ARB, AVAX, OP: research/backtest only.
+- Accounting: `src/accounting/` applies fill and funding events idempotently by venue IDs across restarts; reconciliation blocks new entries on stale data, unknown orders, unsupported symbols, margin failure, or drift.
+- Readiness: see `COMPETITION_READINESS.md`. Launch gate is a 24-36h adapter soak; a separate 120h shadow/testnet campaign is additional evidence, not pre-competition proof.
+- Public/private boundary: see `PUBLIC_RELEASE_POLICY.md`. Credentials, account identifiers, raw fills, and operational logs stay outside GitHub.
+
+Local verification:
+
+```bash
+pip install -r requirements.txt
+python3 -m compileall -q agents controllers src tests
+PYTHONPATH=. python3 tests/test_condor_hummingbot.py
+PYTHONPATH=. python3 -m unittest tests.test_accounting tests.test_competition_profile
+```

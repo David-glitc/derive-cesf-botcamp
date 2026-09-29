@@ -174,3 +174,20 @@ cp conf/scripts/*.yml <hummingbot>/conf/scripts/
 - Botcamp public pages list $800 starting capital, ranking surfaces, eligible exchanges, and Derive team context: <https://www.botcamp.xyz/hackathons/agent-builders-cup-1>
 - Hummingbot September 2026 newsletter lists finalist format, finals window, Derive workshop context, and v2.17 Derive config changes: <https://hummingbot.substack.com/p/hummingbot-newsletter-september-2026>
 - Hummingbot Condor docs describe Condor as an LLM decision harness with deterministic execution: <https://hummingbot.org/installation/condor/>
+
+## V2 Competition Safety Contract
+
+The V2 mainnet lane used for Botcamp scoring is a conservative subset of the above:
+
+| Area | Contract |
+|---|---|
+| Venue boundary | Hummingbot Derive adapter owns data, trading rules, orders, fills, balances, positions, fees, and funding. |
+| Condor | Selects a bounded regime from a normalized snapshot; executors place orders. |
+| Live perps | ETH, BTC, SOL, HYPE candidates, subject to adapter discovery and minimum-order rules. |
+| Live options | Disabled by default; ETH/BTC only after first-class adapter capability tests. |
+| Backtest-only | ARB, AVAX, OP are not part of the default live profile. |
+| Accounting | Fill and funding events keyed by venue IDs, applied idempotently across restarts (`src/accounting/`). |
+| Risk | New entries blocked on stale data, unknown orders, unsupported symbols, margin failure, or reconciliation drift. |
+| Soak | 24-36h adapter soak required before competition launch; 120h shadow/testnet campaign is additional evidence. |
+
+Backtests use proxy data where noted and must not be presented as Derive live evidence. Credentials, account identifiers, raw fills, operational logs, private thresholds, incident notes, and deployment runbooks stay outside GitHub. See `PUBLIC_RELEASE_POLICY.md` and `COMPETITION_READINESS.md`.

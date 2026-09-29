@@ -1,6 +1,5 @@
-# Flyby — Derive CESF — AVAX 1h (+2.89% perps, +428% options, DD -0.83% best DD)
-# NOTE: AVAX-PERP / AVAX options NOT on Derive yet (POST /public/get_all_instruments → Instrument not found) — Binance klines proxy purely for testing the strategy, live fallback HYPE-PERP/XRP-PERP
-# Venue: Derive — synthetic AVAX-PERP (paper) → live fallback HYPE/XRP (Derive native)
+# BACKTEST ONLY — AVAX is not in the live competition profile.
+# Binance klines may be used for research only; no live fallback is implied.
 id: flyby-avax-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
@@ -26,8 +25,8 @@ take_profit: 1.2
 time_limit: 86400
 cooldown_time: 120
 executor_refresh_time: 20
-collateral_asset: multi
-portfolio_margin: true
-options_enabled: true
-spot_hedge_enabled: true
+collateral_asset: USDC
+portfolio_margin: false
+options_enabled: false
+spot_hedge_enabled: false
 candles_config: []
