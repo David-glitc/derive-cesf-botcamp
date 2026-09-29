@@ -335,7 +335,7 @@ def run_once(args: argparse.Namespace, client: HTTPClient, metas: dict[str, Inst
             result = client.active_subaccount.orders.create(
                 instrument_name=meta.name,
                 direction=side,
-                order_type=OrderType.limit,
+                order_type=OrderType.market if args.market else OrderType.limit,
                 limit_price=Decimal(str(snap["mark_price"])),
                 amount=amount,
                 label=f"flyby-v3-{tick}",
@@ -438,6 +438,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-min-multiple", type=float, default=3.0)
     p.add_argument("--active", action="store_true", help="Use Condor active mode for finals style volume")
     p.add_argument("--allow-default-orders", action="store_true", help="Allow default ATM fallback regimes to execute")
+    p.add_argument("--market", action="store_true", help="Use market orders (limit_price kept as worst-price guard)")
     p.add_argument("--execute", action="store_true", help="Place real Derive v3 testnet orders")
     p.add_argument("--status-only", action="store_true")
     p.add_argument("--log-jsonl", default="/repo/hb_backtest/flyby_v3_testnet.jsonl")
