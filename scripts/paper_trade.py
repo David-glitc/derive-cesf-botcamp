@@ -97,10 +97,11 @@ def main():
                            "notional": notion, "tick": tick}
                     paper_pos[inst] = pos
                     fee = notion * TAKER
-                    equity -= fee
                     fid = f"paper-{tick}-{inst}-{uuid.uuid4().hex[:6]}"
-                    ledger.apply_fill(FillEvent(trade_id=fid, instrument=inst,
-                                                side=side, price=mark, amount=qty, fee=fee))
+                    ledger.apply_fill(FillEvent(trade_id=fid, order_id=fid,
+                                                instrument=inst, side=side,
+                                                price=mark, amount=qty, fee=fee))
+                    equity -= fee
                     rec["fill"] = {"id": fid, "side": side, "qty": round(qty, 6),
                                    "price": mark, "fee": round(fee, 4)}
                 elif pos is not None:
@@ -111,14 +112,14 @@ def main():
                     if pnl >= 1.2 or pnl <= -0.48 or hold_min >= 24 * 60 or p["signal"] == 0:
                         gross = pos["notional"] * (1 + pnl)
                         fee = gross * TAKER
+                        fid = f"paper-x-{tick}-{inst}-{uuid.uuid4().hex[:6]}"
+                        ledger.apply_fill(FillEvent(
+                            trade_id=fid, order_id=fid, instrument=inst,
+                            side="long" if pos["side"] == "short" else "short",
+                            price=mark, amount=pos["qty"], fee=fee))
                         dq = gross - fee - pos["notional"]
                         equity += dq
                         peak = max(peak, equity)
-                        fid = f"paper-x-{tick}-{inst}-{uuid.uuid4().hex[:6]}"
-                        ledger.apply_fill(FillEvent(
-                            trade_id=fid, instrument=inst,
-                            side="long" if pos["side"] == "short" else "short",
-                            price=mark, amount=pos["qty"], fee=fee))
                         rec["close"] = {"pnl_pct": round(pnl, 4), "dq": round(dq, 2),
                                         "equity": round(equity, 2)}
                         del paper_pos[inst]
