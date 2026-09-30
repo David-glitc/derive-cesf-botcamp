@@ -98,9 +98,11 @@ def main():
                     paper_pos[inst] = pos
                     fee = notion * TAKER
                     fid = f"paper-{tick}-{inst}-{uuid.uuid4().hex[:6]}"
+                    from decimal import Decimal as _D
                     ledger.apply_fill(FillEvent(trade_id=fid, order_id=fid,
                                                 instrument=inst, side=side,
-                                                price=mark, amount=qty, fee=fee))
+                                                price=_D(str(mark)), amount=_D(str(qty)),
+                                                fee=_D(str(round(fee, 8)))))
                     equity -= fee
                     rec["fill"] = {"id": fid, "side": side, "qty": round(qty, 6),
                                    "price": mark, "fee": round(fee, 4)}
@@ -113,10 +115,12 @@ def main():
                         gross = pos["notional"] * (1 + pnl)
                         fee = gross * TAKER
                         fid = f"paper-x-{tick}-{inst}-{uuid.uuid4().hex[:6]}"
+                        from decimal import Decimal as _D
                         ledger.apply_fill(FillEvent(
                             trade_id=fid, order_id=fid, instrument=inst,
                             side="long" if pos["side"] == "short" else "short",
-                            price=mark, amount=pos["qty"], fee=fee))
+                            price=_D(str(mark)), amount=_D(str(pos["qty"])),
+                            fee=_D(str(round(fee, 8)))))
                         dq = gross - fee - pos["notional"]
                         equity += dq
                         peak = max(peak, equity)
