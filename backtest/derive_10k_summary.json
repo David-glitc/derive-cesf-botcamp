@@ -1,0 +1,46 @@
+{
+  "runs": 10000,
+  "sharpe_gt_05": 6488,
+  "sharpe_mean": 2.401,
+  "sharpe_median": 4.002,
+  "ret_mean": 0.19,
+  "ret_pos_frac": 0.687,
+  "midrun_tightened": 31,
+  "midrun_loosened": 72,
+  "minutes": 18.4,
+  "data": {
+    "symbols": {
+      "ETH-PERP": {
+        "trades": 120000,
+        "bars_5m": 4238,
+        "span_h": 409.6
+      },
+      "BTC-PERP": {
+        "trades": 120000,
+        "bars_5m": 5344,
+        "span_h": 628.2
+      },
+      "SOL-PERP": {
+        "trades": 31000,
+        "bars_5m": 5416,
+        "span_h": 1116.7
+      },
+      "HYPE-PERP": {
+        "trades": 120000,
+        "bars_5m": 6980,
+        "span_h": 692.4
+      }
+    },
+    "rules": {
+      "tick": "0.01",
+      "min": "0.1",
+      "taker": "0.0003"
+    },
+    "spreads": {
+      "ETH-PERP": 6.9,
+      "BTC-PERP": 12.8,
+      "SOL-PERP": 15.7,
+      "HYPE-PERP": 10.8
+    }
+  }
+}
