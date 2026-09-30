@@ -64,7 +64,8 @@ def main():
     ledger = AccountingLedger()
     equity = a.capital
     peak = equity
-    paper_pos = {}  # inst -> {side, qty, entry, notional}
+    paper_pos = {}  # inst -> [ticket, ...]; max 3 concurrent tickets each
+    MAX_TICKETS = 3
     end = time.time() + a.hours * 3600
     tick = 0
     print(f"[{now()}] paper start {','.join(uni)} capital={a.capital}", flush=True)
@@ -87,15 +88,16 @@ def main():
                        "signal": p["signal"], "regime": d.regime, "venue": d.execution_venue,
                        "equity": round(equity, 2)}
                 # paper fill logic: signal -> open; opposing/no signal + TP/SL/time -> close
-                pos = paper_pos.get(inst)
-                if pos is None and p["signal"] != 0:
+                pos_list = paper_pos.setdefault(inst, [])
+                opened = None
+                if p["signal"] != 0 and len(pos_list) < MAX_TICKETS:
                     side = "short" if p["signal"] < 0 else "long"
                     notion = min(equity * 0.05, equity * 0.3)
                     notion = max(notion, 10.0)
                     qty = notion / mark
-                    pos = {"side": side, "qty": qty, "entry": mark,
-                           "notional": notion, "tick": tick}
-                    paper_pos[inst] = pos
+                    ticket = {"side": side, "qty": qty, "entry": mark,
+                              "notional": notion, "tick": tick}
+                    pos_list.append(ticket)
                     fee = notion * TAKER
                     fid = f"paper-{tick}-{inst}-{uuid.uuid4().hex[:6]}"
                     from decimal import Decimal as _D
@@ -104,31 +106,37 @@ def main():
                                                 price=_D(str(mark)), amount=_D(str(qty)),
                                                 fee=_D(str(round(fee, 8)))))
                     equity -= fee
-                    rec["fill"] = {"id": fid, "side": side, "qty": round(qty, 6),
-                                   "price": mark, "fee": round(fee, 4)}
-                elif pos is not None:
-                    hold_min = (tick - pos["tick"]) * a.tick_seconds / 60
-                    ret = ((pos["entry"] - mark) / pos["entry"]
-                           if pos["side"] == "short" else (mark - pos["entry"]) / pos["entry"])
+                    opened = {"id": fid, "side": side, "qty": round(qty, 6),
+                              "price": mark, "fee": round(fee, 4),
+                              "ticket": f"{len(pos_list)}/{MAX_TICKETS}"}
+                    rec["fill"] = opened
+                closed = []
+                for ticket in list(pos_list):
+                    hold_min = (tick - ticket["tick"]) * a.tick_seconds / 60
+                    ret = ((ticket["entry"] - mark) / ticket["entry"]
+                           if ticket["side"] == "short"
+                           else (mark - ticket["entry"]) / ticket["entry"])
                     pnl = ret * 3
                     if pnl >= 1.2 or pnl <= -0.48 or hold_min >= 24 * 60 or p["signal"] == 0:
-                        gross = pos["notional"] * (1 + pnl)
+                        gross = ticket["notional"] * (1 + pnl)
                         fee = gross * TAKER
                         fid = f"paper-x-{tick}-{inst}-{uuid.uuid4().hex[:6]}"
                         from decimal import Decimal as _D
                         ledger.apply_fill(FillEvent(
                             trade_id=fid, order_id=fid, instrument=inst,
-                            side="long" if pos["side"] == "short" else "short",
-                            price=_D(str(mark)), amount=_D(str(pos["qty"])),
+                            side="long" if ticket["side"] == "short" else "short",
+                            price=_D(str(mark)), amount=_D(str(ticket["qty"])),
                             fee=_D(str(round(fee, 8)))))
-                        dq = gross - fee - pos["notional"]
+                        dq = gross - fee - ticket["notional"]
                         equity += dq
                         peak = max(peak, equity)
-                        rec["close"] = {"pnl_pct": round(pnl, 4), "dq": round(dq, 2),
-                                        "equity": round(equity, 2)}
-                        del paper_pos[inst]
-                rec["paper_pos"] = {k: {"side": v["side"], "entry": v["entry"]}
-                                    for k, v in paper_pos.items()}
+                        closed.append({"pnl_pct": round(pnl, 4), "dq": round(dq, 2)})
+                        pos_list.remove(ticket)
+                if closed:
+                    rec["close"] = closed
+                    rec["equity"] = round(equity, 2)
+                rec["paper_pos"] = {k: [{"side": v["side"], "entry": v["entry"]} for v in tickets]
+                                    for k, tickets in paper_pos.items() if tickets}
                 with open(a.log, "a") as fh:
                     fh.write(json.dumps(rec) + "\n")
                 print(f"[{now()}] tick={tick} {inst} mark={mark:.2f} sig={p['signal']} "
