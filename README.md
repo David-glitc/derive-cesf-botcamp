@@ -151,6 +151,8 @@ The V2 competition profile is intentionally conservative:
 - Accounting: `src/accounting/` applies fill and funding events idempotently by venue IDs across restarts; reconciliation blocks new entries on stale data, unknown orders, unsupported symbols, margin failure, or drift.
 - Readiness: see `COMPETITION_READINESS.md`. Launch gate is a 24-36h adapter soak; a separate 120h shadow/testnet campaign is additional evidence, not pre-competition proof.
 - Public/private boundary: see `PUBLIC_RELEASE_POLICY.md`. Credentials, account identifiers, raw fills, and operational logs stay outside GitHub.
+- Creds-free monitor: `scripts/live_testnet_scan.py` polls public testnet marks + Condor regimes, no orders, no credentials.
+- Current testnet execution (Sep 30): ETH/BTC only. SOL/DOGE/ZEC/BNB/HYPE auto-skipped (account risk-1 vs instrument risk-2/3, empty books). Market orders via `--market` after limits rested unfilled.
 
 Local verification:
 
