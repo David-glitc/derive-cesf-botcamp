@@ -43,7 +43,7 @@ The v3 testnet lane scans the native testnet universe by default:
 ETH-PERP,BTC-PERP,DOGE-PERP,ZEC-PERP,HYPE-PERP,SOL-PERP,BNB-PERP
 ```
 
-On the current testnet subaccount, ETH/BTC are in risk universe 1 and can execute. DOGE/ZEC/SOL/BNB have been observed as risk universe 3 for that subaccount, so the runner disables them after the first venue rejection and continues. That behavior is intentional for a public demo: more universe coverage without process crashes.
+On the current testnet subaccount, ETH/BTC are in risk universe 1 and can execute. DOGE/ZEC/SOL/BNB/HYPE have been observed as risk universe 2/3 for that subaccount, so the runner disables them after the first venue rejection and continues. Current execution is ETH/BTC only; market orders via `--market` after limits rested unfilled on the thin testnet book. That behavior is intentional for a public demo: more universe coverage without process crashes.
 
 The Derive v3 testnet book can be thin, so this proof should be judged as an integration and safety proof rather than a production-liquidity claim. The mainnet Hummingbot V2 adapter remains the production route.
 
@@ -94,7 +94,33 @@ Execution
 | Trend | `abs(24h momentum) > 1.2%`, `score < 0.30` | Directional put/call or perp, `TP 1.0`, `12h` max hold |
 | Strangle, active mode | Vol expansion uncertainty is high | Lower thresholds for 48h finals volume while guards stay on |
 
-Sizing: `f* = 0.5 · edge / uncertainty^2 · confidence`, capped by strategy and portfolio guard. The guard blocks orders that breach gross exposure, per-underlying exposure, delta, vega, gamma, margin, daily loss, or peak loss limits.
+Sizing: `f* = 0.5 · edge / uncertainty^2 · confidence`, capped by strategy and portfolio guard. The guard blocks orders that breach gross exposure, per-underlying exposure, delta, vega, gamma, margin, daily loss, or peak loss limits. Note: kelly_cap above the 0.05 fraction cap is inert (fraction binds first); sizing is effectively min(kelly, fraction, 30% equity, $10 floor).
+
+## Live Executor Shape (corrected)
+
+One open executor at a time; at most one live option ticket may sit alongside the perp hedge, never two hedges on the same underlying. Risk gate reads only fields inside `executor_config`:
+
+```text
+manage_executors(
+    action="create",
+    executor_type="position_executor",
+    executor_config={
+        connector_name: "derive",       # Hummingbot Derive adapter
+        trading_pair: "ETH-PERP",       # or BTC-PERP; SOL/HYPE only if venue+account support
+        side: 2,                        # 2 = short perp = synthetic long put
+        total_amount_quote: 400,        # Kelly f* capped, $10 min, 30% cap
+        amount: 400 / entry_price,
+        leverage: 3,
+        controller_id: <this session>,
+        triple_barrier_config: {
+            stop_loss: 0.48,            # 48% ATM (OTM 25Δ: 0.55)
+            take_profit: 1.20,          # 120% ATM (OTM 25Δ: 1.80)
+            time_limit: 86400,          # 24h ATM (OTM 25Δ: 172800)
+            open_order_type: 1
+        }
+    }
+)
+```
 
 ## Backtest Evidence
 
@@ -183,9 +209,10 @@ The V2 mainnet lane used for Botcamp scoring is a conservative subset of the abo
 |---|---|
 | Venue boundary | Hummingbot Derive adapter owns data, trading rules, orders, fills, balances, positions, fees, and funding. |
 | Condor | Selects a bounded regime from a normalized snapshot; executors place orders. |
-| Live perps | ETH, BTC, SOL, HYPE candidates, subject to adapter discovery and minimum-order rules. |
-| Live options | Disabled by default; ETH/BTC only after first-class adapter capability tests. |
-| Backtest-only | ARB, AVAX, OP are not part of the default live profile. |
+| Live perps | ETH, BTC live; SOL, HYPE conditional on adapter discovery, trading-rule validation, and account risk universe. |
+| Live options | Disabled by default; ETH/BTC only after first-class adapter capability tests. ADA/BNB are not listed Derive options and are never claimed. |
+| Backtest-only | ARB, AVAX, OP are not part of the default live profile; SOL/HYPE join them when the venue/account does not support them. |
+| Collateral | USDC-only live. The mixed USDC/ETH/BTC/HYPE/kHYPE model with haircuts is research-only until adapter margin fields prove it. |
 | Accounting | Fill and funding events keyed by venue IDs, applied idempotently across restarts (`src/accounting/`). |
 | Risk | New entries blocked on stale data, unknown orders, unsupported symbols, margin failure, or reconciliation drift. |
 | Soak | 24-36h adapter soak required before competition launch; 120h shadow/testnet campaign is additional evidence. |
