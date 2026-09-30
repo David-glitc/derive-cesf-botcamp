@@ -123,6 +123,23 @@ def decide(market_snapshot: dict, active: bool = False) -> AgentDecision:
     eps = market_snapshot.get("epsilon", 0.03)
     options_capable = bool(market_snapshot.get("options_capable", False))
 
+    # Harden against malformed snapshots: coerce numerics, fall back to
+    # conservative defaults rather than raising inside the decision path.
+    def _num(v, default=0.0):
+        try:
+            f = float(v)
+            return f if math.isfinite(f) else default
+        except (TypeError, ValueError):
+            return default
+
+    cesf = _num(cesf)
+    edge = _num(edge)
+    skew = _num(skew)
+    mom = _num(mom)
+    stale = _num(stale)
+    daily_pnl = _num(daily_pnl)
+    eps = _num(eps, 0.03)
+
     halt_thresh = -0.03 if not active else -0.04  # active allows -4% daily before halt (more action)
     if stale > 60 or daily_pnl <= halt_thresh:
         return AgentDecision("HALT", 0, 0, f"halt stale={stale}s daily={daily_pnl:.1%}", True,
