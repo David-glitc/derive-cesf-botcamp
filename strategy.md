@@ -1,220 +1,147 @@
-# Flyby — Derive Volatility Agent
+# Flyby strategy — implemented competition contract
 
-**Team:** Derive · **Agent:** Flyby · **Type:** Hummingbot V2 Controller + Condor Agent
-**Capital:** $800 per agent · **Finals window:** October 6–9, 2026, with a 48h final run · **Scoring shown publicly:** P&L, volume, HBOT vote
-**Core idea:** Buy volatility only when Derive implied volatility is cheap and CESF crash-mass says the move is operationally real.
+Flyby uses confirmed price/volume movement for short-lived perpetual trades
+and high-confidence ETH/BTC call or put debit-spread plans. The shared policy
+runs deterministically inside the V2 controller; Condor provides the operator
+interface and advisory workflow. An LLM does not choose leverage or bypass
+the controller's risk checks.
 
-Flyby is built as a Derive-native volatility specialist. The strategy uses Derive options math where it matters, Derive perps where the current venue/account supports execution, and a Condor decision layer that picks the regime while deterministic code handles sizing, guards, and orders.
+## Decision and execution
 
-## Submission Fit
+`closed proxy candles → causal features → shared Condor policy → account/book/cost gates → Hummingbot executor`
 
-| Botcamp / Derive requirement | Flyby evidence | Status |
-|---|---|---|
-| Hummingbot V2 Controller or Condor Agent | `controllers/directional_trading/flyby.py`, `agents/condor_agent.py` | Implemented |
-| 100% unattended final run | Guarded controller, deterministic sizing, `scripts/start_flyby_v3_testnet.sh`, `scripts/flyby_v3_status.sh` | Implemented |
-| $800 capital discipline | Backtests and configs use $800 starting capital; position caps are explicit | Implemented |
-| Derive venue focus | SVI surface, Black76 options pricing, Derive public data, V2 mainnet adapter, v3 testnet proof | Implemented |
-| Public proof path | `FLYBY_V3_TESTNET.md`, `run_flyby_v3_testnet.py`, `hb_backtest/flyby_v3_testnet.jsonl` | Running |
-
-## How Flyby Stands Out
-
-Most public builder descriptions cluster around market making, inventory control, LP/range management, funding loops, or generic Condor wrappers. Flyby is different: it is a volatility and options agent designed around Derive’s strongest surface.
-
-| Differentiator | Why it matters for Derive |
+| Stage | Implemented behavior |
 |---|---|
-| SVI + Black76 options stack | Uses the options surface directly instead of treating Derive like a generic perp venue. |
-| CESF crash-mass filter | Avoids buying every cheap-vol print; it trades when downside/event structure is distinguishable. |
-| Perps + options lanes | Perps provide robust execution fallback; options provide convex payoff when available. |
-| Kelly + PortfolioGuard | Sizes from forecast confidence, then enforces hard gross, per-underlying, delta, vega, gamma, margin, daily loss, and peak loss limits. |
-| v3 testnet proof without breaking v2 mainnet | Shows Derive v3 auth/order flow today while preserving the Hummingbot V2 controller path expected by Botcamp. |
-| Honest unsupported-asset handling | Research proxies such as ARB/AVAX/OP stay as paper/backtest assets unless the venue lists them. The runner logs and skips instead of crashing. |
+| Data | Binance perpetual candles, Derive execution books; default 5m, supported 15m/1h/4h |
+| Features | Baseline four-hour trend window; opt-in 5m scalp uses a fixed 30-minute window; efficiency, volume ratio, ATR, HAR/EWMA, CESF diagnostics |
+| Confirmation | Two consecutive bars with matching trend direction, sufficient efficiency and volume |
+| Quality | Volume ≥1.20× baseline, trend magnitude ≥0.90, efficiency ≥0.30, confidence ≥0.70 |
+| Active mode | Normal mode volume ≥1.10× and trend ≥0.70; never relax restricted gates or hard stop |
+| No clean signal | No entry; signal invalidation closes an existing executor |
+| Size | ≤0.5% of budget × confidence / stop distance; also ≤20% notional and available funds |
+| Restricted mode | At −10% peak-relative drawdown: latch restricted mode, confidence ≥0.85, trend ≥1.5, efficiency ≥0.45, current/previous volume ≥1.5; size ≤25%, shrinking through the remaining buffer |
+| Portfolio | 30% gross cap; entries require account flat with no working orders; process-wide proposal reservation |
+| Stops | ATR-dependent 0.3–1.5% price stop; target 1.5–2× stop; baseline roughly 1–3h hold, capped 6h; 5m scalp candidate 10–30m |
+| Costs | Target ≥3× modeled round-trip cost, ≥4× restricted; include entry/exit fee rates, per-order base fees, exit slippage reserve and funding |
+| Entry | Depth-checked marketable LIMIT, quantity quantized to venue rules, 30s unfilled-entry timeout |
+| Exit | Hummingbot triple-barrier MARKET stop/profit/time exits; controller sends early-stop on halt/invalidation |
+| Hard halt | At −15% peak-relative drawdown: persist hard-stop latch, no new entries, cancel/close owned executors; no automatic reset |
 
-## Current Execution Lanes
+The approved starting budget is also a floor for the peak baseline. With a peak
+of $800, $720 enters restricted mode and $680 triggers the hard stop. Profits
+raise the peak, so thresholds rise too. Daily loss is diagnostic, not an independent
+−2% veto in this competition policy. Restricted modeled trade risk cannot exceed
+10% of the remaining dollar loss buffer. Actual losses can exceed the model.
 
-| Lane | Venue | What it proves | Files |
-|---|---|---|---|
-| v3 testnet | Derive v3 testnet | Auth, live market data, Condor decisions, real testnet orders, safe unsupported-instrument handling | `run_flyby_v3_testnet.py`, `scripts/start_flyby_v3_testnet.sh` |
-| v2 mainnet adapter | Hummingbot `derive` connector | Botcamp-compatible controller route for production Hummingbot | `controllers/directional_trading/flyby.py`, `conf/` |
-| Research/backtest | Binance candles + Derive public options data | WFA, SVI, Black76, CESF and guard evidence | `backtest/`, `src/`, `agents/` |
+Restricted mode remains latched after recovery. This is a conservative contest
+rule, not a promise that high-confidence trades recover losses. Confidence is a
+heuristic score, not an estimated win probability. No size rounds up beyond caps.
 
-The v3 testnet lane scans the native testnet universe by default:
+The selectable `competition_scalp` candidate shortens the trend horizon and
+holding cap; it uses hold hysteresis rather than closing whenever entry volume
+drops. It is **not promoted**: the fixed costed comparison increases turnover but
+worsens net P&L. Samples retain `strategy_profile: baseline`, paused. Read the
+[risk/turnover evidence](reports/COMPETITION_RISK_TURNOVER_REPORT.md).
 
-```text
-ETH-PERP,BTC-PERP,DOGE-PERP,ZEC-PERP,HYPE-PERP,SOL-PERP,BNB-PERP
-```
+Leverage is fixed at 2 in the profiles, capped at 3 by validation. Derive's
+adapter doesn't apply a venue leverage setting; sizing does not multiply P&L
+by that label. Thresholds are guard triggers, not guaranteed maximum losses:
+gaps, fees, outages and delayed execution can exceed them.
 
-On the current testnet subaccount, ETH/BTC are in risk universe 1 and can execute. DOGE/ZEC/SOL/BNB/HYPE have been observed as risk universe 2/3 for that subaccount, so the runner disables them after the first venue rejection and continues. Current execution is ETH/BTC only; market orders via `--market` after limits rested unfilled on the thin testnet book. That behavior is intentional for a public demo: more universe coverage without process crashes.
+HAR/EWMA and CESF are computed diagnostics, not proven causal predictors.
+There is no active SVI fitting, Greek portfolio guard, collateral allocation
+or Kelly alpha estimate in this controller. Historical research modules don't
+establish that those mechanisms protect the live competition path.
 
-The Derive v3 testnet book can be thin, so this proof should be judged as an integration and safety proof rather than a production-liquidity claim. The mainnet Hummingbot V2 adapter remains the production route.
+## Option plans
 
-## One-line Pitch
+Bullish signals can produce a call debit spread (buy lower strike, sell
+higher strike); bearish signals can produce a put debit spread (buy higher
+strike, sell lower strike). The policy requires confidence ≥0.75 and a
+caller-provided, verified IV edge ≥0.02. Missing IV means no option plan.
 
-Buy cheap volatility when the forecast says realized vol should exceed the Derive SVI surface and the CESF event score says the move is operationally distinguishable.
+The normalized chain includes instrument IDs, expiry, multiplier, lot/tick
+rules, delta and fresh bid/ask depth. Reject mismatched expiries/contracts,
+2–5 DTE violations, books older than 5s, crossed/unsorted/over-wide books,
+inadequate depth and reward/risk below 1.5. Size uses at most 20% of both
+legs' depth and a 1% account debit budget, preferring approximately 3 DTE.
+The output records matched quantity, limit prices, debit, fee estimate,
+maximum payoff/loss, break-even, net delta and quote expiry.
 
-- **Primary Derive trade:** long put/call options through Black76 and SVI when listed and supported.
-- **Execution fallback:** Derive perps for testnet proof and unsupported option paths.
-- **Decision layer:** Condor chooses regime and threshold; deterministic code prices, sizes, guards, and executes.
+Delta-aware callers additionally supply a signed per-underlying account policy.
+Bought legs use absolute delta 0.25–0.70, sold legs 0.10–0.35, with default
+targets 0.50/0.25. A sold leg must have smaller absolute delta. Selection can
+require ATM, OTM or ITM; ATM is an explicit ±0.5% spot/strike window, not a
+probability inferred from delta. Calls and puts preserve their signed exposure.
+These selection bands are uncalibrated parameters, not established alpha.
 
-Perps are the conservative proof lane. Options are the convex Derive-native lane.
+Size is floored to venue lots within 20% dollar-delta and 30% gross reference
+notional caps, scaled by restricted mode. Gross here conservatively counts
+both option legs at underlying spot, not premium; it is not Derive margin.
+Existing exposure and pending-order fill intervals consume capacity; unfilled
+orders are never credited as guaranteed hedges. Either-leg-only delta is also
+bounded during a fault, but unmatched short options remain prohibited.
+Plans leave headroom for the full debit/fee budget. Controller/paper entries
+also cap all-in loss at the competition governor's per-trade risk budget.
+Standalone legacy planner calls without a delta policy are explicitly
+`delta_verified: false`; they cannot authorize execution.
 
-## Strategy Architecture
+The payoff reward/risk is a bound, not an expected return. Maximum loss assumes
+both legs are matched and fees match the supplied model. Fees use normalized
+premium fractions; the operator must supply adapter-verified costs before
+considering any execution integration.
 
-```text
-Market data
-  ├─ Derive public instruments, tickers, order books
-  └─ Binance candles for research/proxy history
+Paper exits use executable spread credit after actual entry/exit fees: +30%
+profit, −18% stop, signal invalidation, 6h hold or expiry within 6h. Fresh leg
+deltas are recomputed for actual filled quantities; cap breach or invalid
+delta closes when executable books exist and halts subsequent entries. Missing
+close books retain unresolved exposure, null equity and a latched paper halt.
+No ITM condition is required. The paper harness uses the same −10%/−15%
+reducer; its separate account is not a merged options/perps portfolio.
 
-Forecast
-  ├─ HAR-RV: 0.1·RV_month + 0.3·RV_week + 0.6·RV_day
-  └─ EWMA λ=0.94
+`plan_options()` accepts a normalized chain and IV edge. Each controller tick
+can also read a fresh checksummed public market file, use supplied instrument
+fees, and expose a shadow plan. Missing/stale public input clears the plan
+without interrupting protective perp actions. No continuous public collector,
+paired option executor or automatic perp delta hedge is implemented.
+Detailed Condor context includes an allowlisted `options_delta` view. Delta
+and fee verification are separate; old manually supplied chains without fee
+metadata remain fee-unverified. Live option/hedge orders stay disabled.
 
-Vol surface
-  └─ SVI per expiry: w(k)=a+b(ρ(k-m)+sqrt((k-m)^2+σ^2))
+**Never submit these plans as two independent position executors.** The
+current controller rejects `options_enabled: true`. A future paired adapter
+must prove placement, correlation, partial-fill containment and matched
+closure before options can be live. Neither an assumed hedge nor a resting
+limit is protection against an unmatched short option.
 
-Event filter
-  └─ CESF proxy score = tail + kurtosis + clustering + forecast disagreement
+## Runtime safety boundaries
 
-Condor decision
-  ├─ OTM put when edge is high, crash-mass is high, and put skew is rich
-  ├─ ATM put/call when edge is very high
-  └─ Trend ride when momentum is strong and crash-mass is low
+The controller checks connector readiness, private-stream age, observed book
+updates, candle gaps, stale candles, cross-venue basis and existing exposure.
+Known order IDs and bounded owned position sign/size distinguish an active
+executor from unknown exposure. This is not exact ledger reconciliation.
+The idempotent ledger and reconciliation modules are tested helpers; a live
+adapter fill/funding bridge and restart reconciliation still need proof.
 
-Execution
-  ├─ Kelly sizing from edge and uncertainty
-  ├─ PortfolioGuard hard limits
-  └─ Derive perp or option order
-```
+The Hummingbot executor owns order submission and cancellation. Protective
+exits depend on a running client and exchange connectivity; they aren't
+native guaranteed stops. Do not run other strategies or manually trade the
+same account. Persist the shared `data/flyby-risk-flyby-competition.json`, its
+`.initialized` marker and `.lock` file. All selected profiles share the same
+`risk_state_id` and budget. The checkpoint binds to the connector's subaccount
+using a digest; profile changes don't reset latches, cooldowns or consumed signals.
+Reject corrupt, foreign, lost or clock-regressed state. Don't rename the risk
+namespace, delete the data volume, change the budget or manually edit a latch
+to restart trading. Old per-controller checkpoints require operator review.
 
-## Signal Rules
+Entries consume their completed-candle signal before emitting an executor.
+One signal cannot produce duplicate entries after restart. A 60s cooldown in
+the 5m candidate is not a trades/hour quota: entries still need a new closed
+candle, a flat account, valid depth/costs and compatible venue minimums.
 
-| Regime | Condition | Action |
-|---|---|---|
-| OTM put | `edge > 1.8 vol`, `score >= 0.40`, `skew > 2` | Buy 25Δ put, `TP 1.8`, `SL 0.55`, `48h` max hold |
-| ATM put/call | `edge > 2.5 vol`, `score >= 0.35`, ATR ok | Buy ATM option or perp proxy, `TP 1.2`, `SL 0.48`, `24h` max hold |
-| Trend | `abs(24h momentum) > 1.2%`, `score < 0.30` | Directional put/call or perp, `TP 1.0`, `12h` max hold |
-| Strangle, active mode | Vol expansion uncertainty is high | Lower thresholds for 48h finals volume while guards stay on |
+## Evidence
 
-Sizing: `f* = 0.5 · edge / uncertainty^2 · confidence`, capped by strategy and portfolio guard. The guard blocks orders that breach gross exposure, per-underlying exposure, delta, vega, gamma, margin, daily loss, or peak loss limits. Note: kelly_cap above the 0.05 fraction cap is inert (fraction binds first); sizing is effectively min(kelly, fraction, 30% equity, $10 floor).
-
-## Live Executor Shape (corrected)
-
-One open executor at a time; at most one live option ticket may sit alongside the perp hedge, never two hedges on the same underlying. Risk gate reads only fields inside `executor_config`:
-
-```text
-manage_executors(
-    action="create",
-    executor_type="position_executor",
-    executor_config={
-        connector_name: "derive",       # Hummingbot Derive adapter
-        trading_pair: "ETH-PERP",       # or BTC-PERP; SOL/HYPE only if venue+account support
-        side: 2,                        # 2 = short perp = synthetic long put
-        total_amount_quote: 400,        # Kelly f* capped, $10 min, 30% cap
-        amount: 400 / entry_price,
-        leverage: 3,
-        controller_id: <this session>,
-        triple_barrier_config: {
-            stop_loss: 0.48,            # 48% ATM (OTM 25Δ: 0.55)
-            take_profit: 1.20,          # 120% ATM (OTM 25Δ: 1.80)
-            time_limit: 86400,          # 24h ATM (OTM 25Δ: 172800)
-            open_order_type: 1
-        }
-    }
-)
-```
-
-## Backtest Evidence
-
-Live Binance klines, 1h candles, 60d, $800 start, fee 0.06%, spread/slippage assumptions, point-in-time one-bar lag, WFA 60/40, and Guard enabled.
-
-| Pair | Perps best | Return | Trades | Win | DD | Options best | Return | DD |
-|---|---|---:|---:|---:|---:|---|---:|---:|
-| ARBUSDT | `2.0 / 0.35` | +4.23% | 43 | 47% | -4.3% | `2.5 / 0.40` | +106% | -8% |
-| AVAXUSDT | `2.5 / 0.40` | +2.66% | 42 | 50% | -0.83% | `2.0 / 0.40` | +439% | -7% |
-| ETHUSDT | `2.0 / 0.40` | +3.53% | 42 | 45% | -1.3% | `2.0 / 0.40` | +152% | -10% |
-| SOLUSDT | `2.5 / 0.40` | +2.33% | 44 | 52% | -1.4% | `2.5 / 0.40` | +118% | -10% |
-| Universe avg | — | +1.73% | — | — | — | — | +159% | — |
-
-WFA ETH 1h 60d `2.5 / 0.40`: `IS 13.2% Sh 1.92 DD -1.4% → OOS 20.9% Sh 3.79 DD -0.4% → ALL 15.8% Sh 2.45`.
-
-Visual evidence:
-
-![Confusion](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/confusion.png)
-![Heatmap](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/heatmap.png)
-![Equity](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/equity.png)
-![Options vs Perps](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/options_vs_perps.png)
-![WFA](https://raw.githubusercontent.com/David-glitc/derive-cesf-botcamp/master/backtest/standard_wfa.png)
-
-## Runbook
-
-Install dependencies and run research checks:
-
-```bash
-pip install -r requirements.txt
-python backtest/run_backtest.py --pair ETHUSDT --interval 1h --days 60 --thresh 2.5 --cesf_min 0.40 --plot
-PYTHONPATH=. python backtest/run_expanded.py
-PYTHONPATH=. python backtest/run_standard.py --pair ETHUSDT --interval 1h --days 60
-PYTHONPATH=. python src/venue/derive.py
-python -c "from agents.condor_agent import condor_options_demo; print(condor_options_demo())"
-```
-
-Run the Derive v3 testnet demo:
-
-```bash
-cp .env.example .env
-# fill DERIVE_SESSION_KEY, DERIVE_WALLET, DERIVE_SUBACCOUNT_ID, DERIVE_ETH_CHAIN
-bash scripts/start_flyby_v3_testnet.sh
-bash scripts/flyby_v3_status.sh
-```
-
-Install into Hummingbot V2 for the mainnet controller lane:
-
-```bash
-cp controllers/directional_trading/flyby.py <hummingbot>/controllers/directional_trading/
-cp conf/controllers/*.yml <hummingbot>/conf/controllers/
-cp conf/scripts/*.yml <hummingbot>/conf/scripts/
-# Hummingbot CLI:
-# create --controller-config directional_trading.flyby
-# start --v2 conf_v2_flyby.yml
-```
-
-## Key Files
-
-| File | Purpose |
-|---|---|
-| `agents/condor_agent.py` | Condor `decide(snapshot) -> AgentDecision` regime router |
-| `controllers/directional_trading/flyby.py` | Hummingbot V2 controller |
-| `run_flyby_v3_testnet.py` | Derive v3 testnet runner with real orders and status mode |
-| `scripts/start_flyby_v3_testnet.sh` | One-command testnet startup |
-| `scripts/flyby_v3_status.sh` | Process, order, position, and log status |
-| `src/svi/` | SVI fit and no-arb checks |
-| `src/pricing/black76.py` | Options pricing |
-| `src/risk/portfolio_guard.py` | Portfolio risk limits |
-| `src/collateral/multi_collateral.py` | Multi-collateral model |
-| `backtest/` | Research harness and plots |
-| `FLYBY_V3_TESTNET.md` | Testnet runbook |
-| `SUBMISSION_POSITIONING.md` | Rules, public landscape, and pitch notes |
-
-## Source Notes
-
-- Hummingbot release notes describe Agent Builders Cup rules, sponsor format, prize pool, V2 Controller or Condor Agent eligibility, and 48h finals: <https://hummingbot.org/release-notes/2.16.0/>
-- Botcamp public pages list $800 starting capital, ranking surfaces, eligible exchanges, and Derive team context: <https://www.botcamp.xyz/hackathons/agent-builders-cup-1>
-- Hummingbot September 2026 newsletter lists finalist format, finals window, Derive workshop context, and v2.17 Derive config changes: <https://hummingbot.substack.com/p/hummingbot-newsletter-september-2026>
-- Hummingbot Condor docs describe Condor as an LLM decision harness with deterministic execution: <https://hummingbot.org/installation/condor/>
-
-## V2 Competition Safety Contract
-
-The V2 mainnet lane used for Botcamp scoring is a conservative subset of the above:
-
-| Area | Contract |
-|---|---|
-| Venue boundary | Hummingbot Derive adapter owns data, trading rules, orders, fills, balances, positions, fees, and funding. |
-| Condor | Selects a bounded regime from a normalized snapshot; executors place orders. |
-| Live perps | ETH, BTC live; SOL, HYPE conditional on adapter discovery, trading-rule validation, and account risk universe. |
-| Live options | Disabled by default; ETH/BTC only after first-class adapter capability tests. ADA/BNB are not listed Derive options and are never claimed. |
-| Backtest-only | ARB, AVAX, OP are not part of the default live profile; SOL/HYPE join them when the venue/account does not support them. |
-| Collateral | USDC-only live. The mixed USDC/ETH/BTC/HYPE/kHYPE model with haircuts is research-only until adapter margin fields prove it. |
-| Accounting | Fill and funding events keyed by venue IDs, applied idempotently across restarts (`src/accounting/`). |
-| Risk | New entries blocked on stale data, unknown orders, unsupported symbols, margin failure, or reconciliation drift. |
-| Soak | 24-36h adapter soak required before competition launch; 120h shadow/testnet campaign is additional evidence. |
-
-Backtests use proxy data where noted and must not be presented as Derive live evidence. Credentials, account identifiers, raw fills, operational logs, private thresholds, incident notes, and deployment runbooks stay outside GitHub. See `PUBLIC_RELEASE_POLICY.md` and `COMPETITION_READINESS.md`.
+See [stress results](reports/STRESS_REPORT.md) for losses, mitigations and
+limitations. OHLC replay doesn't prove Derive fills, spread profitability,
+live restart safety or competition readiness. No winning performance is
+claimed for the current strategy.

@@ -1,0 +1,16 @@
+{
+  "checked_at": "2026-10-02",
+  "version": "2.17.0",
+  "tag": "hummingbot/hummingbot:version-2.17.0",
+  "digest": "sha256:d8eb5675cdd37f84f8d132b79b932f012d755d97f21e2da3fd4fef955609079d",
+  "release_notes": "https://hummingbot.org/release-notes/2.17.0/",
+  "validation": "Isolated pinned-image contract tests and mainnet-only installation; not a live trading certification",
+  "condor_api": "Continuous main-branch releases; no client version pin implied",
+  "execution_environment": {
+    "network": "mainnet",
+    "connector": "derive_perpetual",
+    "api_generation": "legacy_v2",
+    "http_url": "https://api.lyra.finance",
+    "ws_url": "wss://api.lyra.finance/ws"
+  }
+}

@@ -1,265 +1,116 @@
-"""Condor harness — bounded Agent lane policy over the V2 controller.
-
-The policy is venue-agnostic and capability-gated. It can reason about
-options research features, but it only advertises an options route when the
-normalized Hummingbot/Derive snapshot explicitly says that option discovery
-and execution are available.
-
-Condor is the LLM-driven harness (https://condor.hummingbot.org) that
-reasons about market conditions and supervises deterministic executors.
-
-Architecture invariant: LLM never prices options or places orders.
-It only:
-  - selects regime (ATM vs OTM vs Trend) based on CESF score & SVI slope
-  - tunes thresh/cesf_min within pre-approved bands
-  - halts if data stale or risk guard tripped
-
-Deterministic stack that DOES price/execute:
-  - src/venue/derive.py : public research data only
-  - src/svi/fit.py       : fit_svi_slice(τ, ks, ivs) 600it butterfly+calendar → iv_from_svi(k)
-  - src/pricing/black76.py: Black76(F,K,τ,r,vol) → premium, delta, vega, gamma
-  - src/collateral/multi_collateral.py: research collateral model
-  - src/risk/portfolio_guard.py: local risk model; live margin is adapter-reported
-
-This file makes your submission valid for BOTH lanes:
-  - Controller lane: submit controller directly (derive_cesf_long_vol.py)
-  - Agent lane: submit this Condor agent + same controller
-Live scoring claims are made only after the installed adapter and deployment
-tests prove the relevant capability.
-"""
+"""Deterministic Flyby decision policy used by Condor, V2 and replay."""
 from __future__ import annotations
-import json, time, math
+import math
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from dataclasses import dataclass
+import json
+import time
 
-# ── Derive options stack (Condor routines) ───────────────────────
-# Optional research imports. Live execution remains inside the adapter.
-try:
-    from src.svi.fit import fit_svi_slice  # noqa
-    from src.pricing.black76 import black76_price, black76_delta  # noqa
-    from src.venue.derive import fetch_svi_inputs, get_ticker  # noqa
-    from src.collateral.multi_collateral import CollateralVault, DERIVE_COLLATERAL  # noqa
-    from src.risk.portfolio_guard import PortfolioGuard  # noqa
-    _DERIVE_STACK = True
-except Exception:
-    _DERIVE_STACK = False
 
-@dataclass
+@dataclass(frozen=True)
 class AgentDecision:
-    regime: str  # scalp-long-put-atm | scalp-long-put-otm-25d | trend-ride-put | etc
-    thresh: float
-    cesf_min: float
-    reason: str
+    regime: str
+    thresh: float = 2.5
+    cesf_min: float = 0.35
+    reason: str = "no_clean_signal"
     halt: bool = False
-    # ── Derive bonus fields (populated by decide) ───────────────
-    execution_venue: str = "derive-perp"  # derive-perp | derive-options | derive-spot
-    derive_instrument: str | None = None  # e.g. ETH-20250918-2950-P or ETH-PERP
-    collateral_hint: str | None = None    # e.g. post ETH + HYPE
-    margin_model: str | None = None       # portfolio(net) vs isolated
+    execution_venue: str = "none"
+    derive_instrument: str | None = None
+    collateral_hint: str = "adapter-reported USDC"
+    margin_model: str = "adapter-reported margin"
+    signal: int = 0
+    confidence: float = 0.0
+    option_direction: str | None = None
 
-# ── Bands — CONSERVATIVE (tuned 60d) vs ACTIVE (more volume for finals) ───
-BANDS = {
-    "thresh": (1.5, 2.8),
-    "cesf_min": (0.30, 0.50),
-}
-BANDS_ACTIVE = {
-    "thresh": (1.2, 2.5),   # lower edge threshold → ~1.6× more signals
-    "cesf_min": (0.25, 0.45),# lower cesf → more trades in choppy markets
-    "momentum": (0.008, 0.015), # 0.8% vs 1.2% momentum trigger
-    "kelly_boost": 1.5,      # 1.5× Kelly for volume (Guard still caps gross 240)
-}
 
-REGIME_RULES = """
-# Conservative (60d tuned): 0.68 tr/day, DD -1.5%
-If CESF crash_mass >=0.40 and SVI skew steep (put IV > call IV by >2 vol) → OTM put 25Δ (cheaper gamma, better Sharpe when smile rich) → Derive OPTIONS (Black76/SVI)
-If crash_mass 0.30-0.40 and ATM edge >1.8 → ATM put (primary +24% regime) → Derive PERP (synthetic) or ATM option
-If momentum 24x5m >1.2% and vol not stretched but CESF low → trend-ride call → Derive PERP/SPOT
-If vol expansion + low CESF → OTM strangle / long call OTM → Derive OPTIONS 25Δ
-If daily loss <-2% or stale >60s → HALT
+def number(value, default=None):
+    try:
+        value = float(value)
+        return value if math.isfinite(value) else default
+    except (TypeError, ValueError):
+        return default
 
-# ACTIVE (finals 48h — more Volume for P&L+Volume+HBOT scoring):
-# Same logic but thresh 1.2 vs 1.5, cesf 0.25 vs 0.30, mom 0.8% vs 1.2%
-# + NEW: strangle-long-otm (both wings cheap, vol expansion bet) → OTM put+call
-# + NEW: scalp-reversion (high eps + low CESF, mean-reversion long call)
-# + NEW: optional spot rebalance research path; live use requires adapter proof
-# Expected: ~1.2-1.5 tr/day (+80%), Guard still holds DD -2.5%, extra volume wins finals.
-"""
 
-def _derive_option_execution_hint(snapshot: dict, regime: str) -> tuple[str, str | None]:
-    """Map regime → Derive instrument + venue (Condor routine)."""
+def decide(snapshot: dict, active: bool = False) -> AgentDecision:
+    fields = ("price", "trend_z", "efficiency", "volume_ratio", "atr_pct", "stale_secs", "daily_pnl_pct", "peak_dd",
+              "previous_trend_z", "previous_volume_ratio", "previous_efficiency")
+    values = {name: number(snapshot.get(name)) for name in fields}
+    if any(value is None for value in values.values()) or snapshot.get("valid") is not True:
+        return AgentDecision("HALT", reason="invalid_snapshot", halt=True)
+    if values["stale_secs"] < 0 or values["stale_secs"] > 60:
+        return AgentDecision("HALT", reason="stale_data", halt=True)
+    if not 0 <= values["efficiency"] <= 1 or values["volume_ratio"] < 0:
+        return AgentDecision("HALT", reason="invalid_snapshot", halt=True)
+    from src.risk.competition import POLICY
+    competition = snapshot.get("risk_policy") == POLICY
+    restricted = competition and snapshot.get("risk_mode") == "restricted"
+    if competition:
+        mode = snapshot.get("risk_mode")
+        if mode not in ("normal", "restricted", "hard_stop"):
+            return AgentDecision("HALT", reason="invalid_risk_mode", halt=True)
+        if mode == "hard_stop" or values["peak_dd"] <= -.15:
+            return AgentDecision("HALT", reason="competition_hard_stop", halt=True)
+        if mode == "normal" and values["peak_dd"] <= -.10:
+            return AgentDecision("HALT", reason="risk_mode_mismatch", halt=True)
+    elif values["daily_pnl_pct"] <= -0.02 or values["peak_dd"] <= -0.04:
+        return AgentDecision("HALT", reason="loss_guard", halt=True)
+    if snapshot.get("reconciled") is not True:
+        return AgentDecision("HALT", reason="account_unreconciled", halt=True)
+    if values["price"] <= 0 or not 0.0003 <= values["atr_pct"] <= 0.03:
+        return AgentDecision("flat", reason="volatility_gate")
+    volume_floor = 1.50 if restricted else 1.10 if active else 1.20
+    trend_floor = 1.50 if restricted else .70 if active else .90
+    efficiency_floor = .45 if restricted else .30
+    if values["volume_ratio"] < volume_floor:
+        return AgentDecision("flat", reason="volume_gate")
+    if values["efficiency"] < efficiency_floor or abs(values["trend_z"]) < trend_floor:
+        return AgentDecision("flat", reason="trend_gate")
+    if (values["previous_trend_z"] * values["trend_z"] <= 0
+            or abs(values["previous_trend_z"]) < trend_floor
+            or values["previous_volume_ratio"] < volume_floor
+            or not efficiency_floor <= values["previous_efficiency"] <= 1):
+        return AgentDecision("flat", reason="confirmation_gate")
+    confidence = min(1.0, 0.35 * min(abs(values["trend_z"]) / 2, 1)
+                     + 0.35 * values["efficiency"] + 0.30 * min(values["volume_ratio"] / 2, 1))
+    if confidence < (.85 if restricted else .70):
+        return AgentDecision("flat", reason="confidence_gate")
+    direction = 1 if values["trend_z"] > 0 else -1
     ccy = snapshot.get("ccy", "ETH")
-    spot = snapshot.get("spot", 3000)
-    if "otm" in regime:
-        # 25Δ OTM put: K = 0.97*F for τ7d approx; live would invert d2= -0.67 → K from SVI
-        k_target = -0.03  # log(K/F) ≈ -3% for 25Δ
-        K = int(round(spot * math.exp(k_target) / 10) * 10)
-        inst = f"{ccy}-7d-{K}-P(25Δ) → {_derive_instrument(ccy, K, 'P')}"
-        return "derive-options", inst
-    if regime == "scalp-long-put-atm":
-        return "derive-perp", f"{ccy}-PERP"
-    return "derive-perp", f"{ccy}-PERP"
+    option_candidate = ccy in ("ETH", "BTC") and confidence >= 0.75 and number(snapshot.get("option_iv_edge"), 0) >= 0.02
+    return AgentDecision(
+        "call-debit-spread" if option_candidate and direction > 0 else
+        "put-debit-spread" if option_candidate else
+        "perp-scalp-long" if direction > 0 else "perp-scalp-short",
+        reason="confirmed_price_volume", signal=direction, confidence=confidence,
+        execution_venue="spread-plan" if option_candidate else "derive-perp",
+        derive_instrument=f"{ccy}-PERP" if not option_candidate else None,
+        option_direction=("call" if direction > 0 else "put") if option_candidate else None,
+    )
 
-def _derive_instrument(ccy: str, strike: int, kind: str) -> str:
-    # placeholder for nearest expiry naming; live fetch via /public/get_all_instruments
-    return f"{ccy}-YYYYMMDD-{strike}-{kind}"
-
-def decide(market_snapshot: dict, active: bool = False) -> AgentDecision:
-    """Pure function — LLM would call this, but we implement rule-based for determinism.
-
-    Condor lane: this IS the Derive options routine. It reads SVI skew (from
-    src/venue/derive.py + src/svi/fit.py) and routes OTM wings to Derive options
-    via Black76 (src/pricing/black76.py), alongside perp research, with local
-    collateral/risk diagnostics. Live use requires explicit adapter capability.
-
-    active=False: conservative 60d-tuned (0.68 tr/day, DD -1.5%) — current submission.
-    active=True : finals 48h aggressive (+80% volume, DD -2.5% still guarded) — pick this for volume scoring.
-    """
-    cesf = market_snapshot.get("cesf_score", 0)
-    edge = market_snapshot.get("edge", 0)
-    skew = market_snapshot.get("svi_skew", 0)  # put IV - call IV at 25Δ from SVI fit
-    mom = market_snapshot.get("momentum", 0)
-    stale = market_snapshot.get("stale_secs", 0)
-    daily_pnl = market_snapshot.get("daily_pnl_pct", 0)
-    eps = market_snapshot.get("epsilon", 0.03)
-    options_capable = bool(market_snapshot.get("options_capable", False))
-
-    # Harden against malformed snapshots: coerce numerics, fall back to
-    # conservative defaults rather than raising inside the decision path.
-    def _num(v, default=0.0):
-        try:
-            f = float(v)
-            return f if math.isfinite(f) else default
-        except (TypeError, ValueError):
-            return default
-
-    cesf = _num(cesf)
-    edge = _num(edge)
-    skew = _num(skew)
-    mom = _num(mom)
-    stale = _num(stale)
-    daily_pnl = _num(daily_pnl)
-    eps = _num(eps, 0.03)
-
-    halt_thresh = -0.03 if not active else -0.04  # active allows -4% daily before halt (more action)
-    if stale > 60 or daily_pnl <= halt_thresh:
-        return AgentDecision("HALT", 0, 0, f"halt stale={stale}s daily={daily_pnl:.1%}", True,
-                             execution_venue="HALT", collateral_hint="—", margin_model="HALT")
-
-    # Thresholds widen when active
-    otm_cesf = 0.40 if not active else 0.33
-    otm_skew = 2.0 if not active else 1.2
-    otm_edge = 0.015 if not active else 0.010
-    atm_edge = 0.018 if not active else 0.012
-    atm_cesf = 0.33 if not active else 0.27
-    mom_thr = 0.012 if not active else 0.008
-
-    # ── ACTIVE NEW REGIME: strangle when both wings cheap + vol expansion ──
-    if options_capable and active and cesf < 0.28 and edge > 0.016 and eps > 0.04 and abs(skew) < 1.0:
-        venue, inst = _derive_option_execution_hint(market_snapshot, "strangle-long-otm")
-        return AgentDecision("strangle-long-otm", 1.5, 0.28,
-                             f"STRANGLE OTM: vol expansion eps {eps:.3f} edge {edge:.3f} skew {skew:.1f} → {venue} put+call 25Δ",
-                             execution_venue="derive-options", derive_instrument=inst,
-                             collateral_hint="adapter-reported collateral",
-                             margin_model="adapter-verified margin required")
-
-    # OTM put 25Δ → Derive OPTIONS (bonus scoring: Condor options alongside perps)
-    if options_capable and cesf >= otm_cesf and skew > otm_skew and edge > otm_edge:
-        venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-put-otm-25d")
-        kelly_note = " Kelly 1.5×" if active else ""
-        return AgentDecision("scalp-long-put-otm-25d", 1.8 if not active else 1.5, 0.40 if not active else 0.33,
-                             f"OTM put: cesf {cesf:.2f} skew {skew:.1f} edge {edge:.3f} → {venue} {inst} Black76 τ7d SVI{kelly_note}",
-                             execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="adapter-reported collateral",
-                             margin_model="adapter-verified margin required")
-    if cesf >= atm_cesf and edge > atm_edge:
-        venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-put-atm")
-        return AgentDecision("scalp-long-put-atm", 2.5 if not active else 2.0, 0.35 if not active else 0.27,
-                             f"ATM put: cesf {cesf:.2f} edge {edge:.3f} → {venue} {inst}",
-                             execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="adapter-reported collateral",
-                             margin_model="adapter-reported margin")
-    if mom > mom_thr and cesf < (0.30 if not active else 0.35):
-        return AgentDecision("trend-ride-call", 1.8, 0.30, f"trend call: mom {mom:.3f} ({'active 0.8%' if active else 'cons 1.2%'})",
-                             execution_venue="derive-perp/spot", collateral_hint="adapter-reported collateral",
-                             margin_model="adapter-reported margin")
-    if mom < -mom_thr and cesf < (0.30 if not active else 0.35):
-        return AgentDecision("trend-ride-put", 1.8, 0.30, f"trend put: mom {mom:.3f}",
-                             execution_venue="derive-perp", collateral_hint="adapter-reported collateral",
-                             margin_model="adapter-reported margin")
-    # Mean-reversion scalp when vol stretched but no crash
-    if options_capable and active and cesf < 0.32 and edge > 0.010 and eps > 0.035:
-        venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-call-otm-25d")
-        return AgentDecision("scalp-long-call-otm-25d", 1.5, 0.27,
-                             f"SCALP call: mean-rev eps {eps:.3f} edge {edge:.3f} cesf {cesf:.2f} → {venue}",
-                             execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="adapter-reported collateral",
-                             margin_model="adapter-verified margin required")
-
-    if options_capable and cesf < 0.25 and edge > 0.022:
-        venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-call-otm-25d")
-        return AgentDecision("scalp-long-call-otm-25d", 2.2, 0.30, f"OTM call expansion → {venue} {inst}",
-                             execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="adapter-reported collateral",
-                             margin_model="adapter-verified margin required")
-    # ACTIVE fallback: still take more trades when edge modest
-    if active and edge > 0.008 and cesf >= 0.25:
-        venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-put-atm")
-        return AgentDecision("scalp-long-put-atm", 1.5, 0.25,
-                             f"ACTIVE fallback ATM: edge {edge:.3f} cesf {cesf:.2f} → {venue}",
-                             execution_venue=venue, derive_instrument=inst,
-                             collateral_hint="adapter-reported collateral",
-                             margin_model="adapter-reported margin")
-    # default ATM put — still Derive perp (spot/perp requirement satisfied)
-    venue, inst = _derive_option_execution_hint(market_snapshot, "scalp-long-put-atm")
-    return AgentDecision("scalp-long-put-atm", 2.0, 0.35,
-                         "default ATM put → derive perp (options capability unavailable)",
-                         execution_venue="derive-perp", derive_instrument=f"{market_snapshot.get('ccy', 'ETH')}-PERP",
-                         collateral_hint="adapter-reported collateral",
-                         margin_model="adapter-reported margin")
 
 def decide_active(snapshot: dict) -> AgentDecision:
-    """Shorthand for finals — 48h volume mode."""
     return decide(snapshot, active=True)
 
-# ── Explicit Condor options demonstration (for judges/video) ──────
-def condor_options_demo(spot: float = 3000, ccy: str = "ETH") -> dict:
-    """Run the research-only options stack in one call.
 
-    1. fetch_svi_inputs(ccy) → w=iv²τ points from public Derive data
-    2. fit_svi_slice(τ, ks, ivs) → SVI params a,b,ρ,m,σ with butterfly+calendar
-    3. black76_price(F,K,τ,r,vol_SVI) → OTM 25Δ put premium + greeks
-    4. local collateral/risk models → research diagnostics only
-    """
-    if not _DERIVE_STACK:
-        return {"ok": False, "reason": "stack not importable (run PYTHONPATH=. )"}
-    try:
-        # Use synthetic SVI if Derive API down (backtest mode)
-        ks = [-0.4, -0.2, 0.0, 0.2, 0.4]; ivs = [0.72, 0.62, 0.58, 0.60, 0.68]
-        tau = 7/365
-        from src.svi.fit import fit_svi_slice
-        from src.pricing.black76 import black76_price
-        p, rmse = fit_svi_slice(tau, ks, ivs)
-        from src.svi.params import iv_from_svi
-        iv_atm = iv_from_svi(0.0, tau, p)
-        iv_otm = iv_from_svi(-0.03, tau, p)  # ~25Δ put
-        F = spot; K_atm = F; K_otm = int(round(F*0.97))
-        prem_atm = black76_price(F, K_atm, tau, 0, iv_atm, "put")
-        prem_otm = black76_price(F, K_otm, tau, 0, iv_otm, "put")
-        return {"ok": True, "iv_atm": round(iv_atm,3), "iv_otm": round(iv_otm,3),
-                "prem_atm": round(prem_atm,2), "prem_otm": round(prem_otm,2),
-                "svi": f"a={p.a:.4f} b={p.b:.3f} ρ={p.rho:.2f} rmse={rmse:.4f}",
-                "venue": "research-only options model (Black76 τ7d, SVI)",
-                "collateral": "research model only",
-                "margin": "adapter capability required for live margin"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+def options_context(snapshot: dict, now: float) -> dict:
+    """Allowlisted advisory context; cannot alter policy or authorize option orders."""
+    from src.options.delta import delta_context
+    context = delta_context(snapshot.get("spread_plan"), now)
+    context["execution_mode"] = "shadow_only"
+    context["intent"] = "bounded_directional_spread_not_delta_neutral"
+    context["risk_mode"] = snapshot.get("risk_mode") if snapshot.get("risk_mode") in ("normal", "restricted", "hard_stop") else "unavailable"
+    context["remaining_loss_buffer"] = number(snapshot.get("remaining_loss_buffer"))
+    return context
 
-def log_decision(path: Path, snap: dict, dec: AgentDecision):
+
+def log_decision(path: Path, snapshot: dict, decision: AgentDecision):
     path.parent.mkdir(parents=True, exist_ok=True)
-    rec = {"ts": time.time(), "snapshot": snap, "decision": dec.__dict__}
-    with path.open("a") as f: f.write(json.dumps(rec)+"\n")
+    with path.open("a") as stream:
+        stream.write(json.dumps({"ts": time.time(), "snapshot": snapshot, "decision": asdict(decision)}, allow_nan=False) + "\n")
 
-# Example standalone run:
-if __name__ == "__main__":
-    snap = {"cesf_score":0.42,"edge":0.019,"svi_skew":2.5,"momentum":0.0,"stale_secs":0,"daily_pnl_pct":0}
-    print(decide(snap))
+
+def condor_options_demo(spot=3000, ccy="ETH"):
+    """Legacy research helper, outside the competition decision path."""
+    from src.pricing.black76 import black76_price
+    return {"ok": True, "venue": "research-only", "ccy": ccy,
+            "call_model": black76_price(spot, spot, 3 / 365, 0, 0.6, "call")}

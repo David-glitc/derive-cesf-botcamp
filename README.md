@@ -1,164 +1,95 @@
-# Flyby — Derive Volatility Agent
+# Flyby — Hummingbot V2 + Condor
 
-Flyby is a Hummingbot V2 Controller plus Condor Agent for Derive. It buys volatility when the forecast says realized volatility should exceed the Derive SVI surface and CESF crash-mass says the move is real enough to trade.
+Run one deterministic Flyby policy through Hummingbot's Derive perpetual
+mainnet adapter. ETH/BTC are primary candidates; SOL/HYPE are fallback profiles.
+The team chooses the enabled markets and account universe.
 
-For Botcamp judging, the short version is simple: Flyby is a Derive-native vol/options agent built for Derive’s volatility surface. It combines SVI, Black76, HAR-RV/EWMA, CESF, Kelly sizing, and hard portfolio guards, with a v3 testnet proof lane and a V2 mainnet controller lane.
+Fixed submission identity: `flyby-baseline-dd10-dd15-v1`. Condor discovers agent
+`flyby` and explicit loop `flyby.flyby_operator`; see the
+[Condor installation guide](condor/INSTALL.md). All samples remain paused.
+The [final Condor verification report](reports/CONDOR_FINAL_VERIFICATION.md)
+records discovery/tick/install evidence and the remaining production gates.
 
-## Read First
+**Current verdict: not cleared for live trading.** Contract tests pass in
+Hummingbot v2.17.0, but stress replay remains negative after risk mitigations.
+Option spreads are shadow plans, not live orders. Read the
+[stress report](reports/STRESS_REPORT.md) and [launch gates](COMPETITION_READINESS.md).
+The latest [competition risk/turnover report](reports/COMPETITION_RISK_TURNOVER_REPORT.md)
+covers the approved −10% restricted / −15% hard stop and the unpromoted scalp
+candidate. Higher modeled volume did not improve net P&L.
+The [delta/options report](reports/DELTA_OPTIONS_REPORT.md) covers delta-aware
+shadow sizing, Condor context, dynamic paper exits and twenty 48-hour proxy cases.
 
-| Doc | Use |
-|---|---|
-| [`strategy.md`](strategy.md) | Main Botcamp submission and strategy explanation |
-| [`SUBMISSION_POSITIONING.md`](SUBMISSION_POSITIONING.md) | Rules, public landscape, and how Flyby stands out |
-| [`FLYBY_V3_TESTNET.md`](FLYBY_V3_TESTNET.md) | Derive v3 testnet runbook |
-| [`hb_backtest/testnet_proof.md`](hb_backtest/testnet_proof.md) | Testnet proof notes |
-| [`hb_backtest/flyby_v3_testnet.jsonl`](hb_backtest/flyby_v3_testnet.jsonl) | Live/testnet decision and order trace |
+## Submission files
 
-## Current Lanes
+| Component | File | Responsibility |
+|---|---|---|
+| V2 controller | [flyby.py](controllers/directional_trading/flyby.py) | Account/book gates, bounded sizing, executor actions |
+| Compatibility name | [derive_cesf_long_vol.py](controllers/directional_trading/derive_cesf_long_vol.py) | Import only; not a second strategy |
+| Condor policy | [condor_agent.py](agents/condor_agent.py) | Shared deterministic price/volume decision |
+| Condor identity | [agent package](condor/flyby/AGENT.md) | Operator workflow; cannot override risk gates |
+| Condor loop | [loop.md](condor/flyby/loops/flyby_operator/loop.md) | Controller-mode playbook; one dry-run tick by default |
+| Fixed profile | [PROFILE.yml](condor/flyby/PROFILE.yml) | Machine-checked baseline and risk identity |
+| Features | [signal module](src/signal/flyby.py) | Closed-bar, causal, timeframe-aware indicators |
+| Risk | [position sizing](src/risk/position_sizing.py) | Exposure, drawdown scaling, costs and executable depth |
+| Competition governor | [account risk state](src/risk/competition.py) | Shared restart-persistent loss latches, consumed signals and cooldowns |
+| Options | [spread builder](src/options/spread_builder.py) | Matched call/put debit-spread plans, no order sender |
+| Configuration | [launcher](conf/scripts/conf_v2_flyby.yml) | ETH selected, paused; team explicitly enables others |
 
-| Lane | Venue | Purpose | Entry point |
-|---|---|---|---|
-| v3 testnet | Derive v3 testnet | Demonstrate auth, live data, Condor decisions, real testnet orders, and no-crash unsupported-symbol handling | `run_flyby_v3_testnet.py` |
-| v2 mainnet adapter | Hummingbot `derive` connector | Keep the Botcamp-compatible Hummingbot controller path | `controllers/directional_trading/flyby.py` |
-| Research/backtest | Binance candles + Derive public options data | Reproducible signal, SVI, Black76, WFA, and Guard evidence | `backtest/`, `src/` |
+The [artifact index](SUBMISSION_ARTIFACT.md) lists required dependencies.
+The [final hardening report](reports/FINAL_SUBMISSION_REPORT.md) covers the
+explicit pinned connector patch, BASE-USDC mapping, current minimum-size
+incompatibility and Condor sample discovery. Install using
+[the tested team guide](MAINNET_SETUP.md); importing the Condor wrapper alone
+doesn't install shared modules or clear launch gates.
+The [strategy explanation](strategy.md) describes implemented rules and limits.
+Legacy research scripts are not the current strategy. The old v3 runner and
+raw operational logs were preserved locally outside the submission surface.
 
-The v3 runner scans this native testnet universe by default:
+## Validate locally
+
+Use Python 3.11+ for pure tests; run controller tests in the pinned image.
+
+```bash
+python3 -m pip install -r requirements.txt
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q
+bash scripts/test_hummingbot.sh
+PYTHONPATH=. python3 backtest/stress_flyby.py --runs 1000 --bars 5000 --workers 4
+```
+
+The replay writes `stress_artifacts/` and caches candles under `data/`.
+Both are ignored. Five million evaluations reuse 64,800 unique historical
+candles: they are not five million independent candles or 1,000 independent
+historical periods. Funding, depth and option books are scenario models.
+
+## Install into Hummingbot
+
+Pin the [validated client image](hummingbot-version.json). Use a dedicated
+account, persist its `data/` directory, and configure secrets through
+Hummingbot. v2.17 renamed Derive credential fields; re-connect the connector
+as described in the [release notes](https://hummingbot.org/release-notes/2.17.0/).
+
+Use [mainnet setup](MAINNET_SETUP.md) for the team handoff. The competition
+runtime accepts only `derive_perpetual` and rejects testnet/paper overrides.
+The stock connector uses the legacy v2 API at `https://api.lyra.finance`;
+the options public-data harness uses v3 separately. This is not a v3 trading
+migration. The installer checks endpoints and paused profiles before writes.
+
+Run this inside your Hummingbot environment with this repository at `/repo`:
+
+```bash
+bash /repo/scripts/install_hummingbot.sh /home/hummingbot
+```
+
+In the client, configure `derive_perpetual`, review the selected profile's
+budget and fee estimate, and keep `manual_kill_switch: true` until the launch
+gates pass. Once the operator clears those gates and deliberately changes
+that switch, the CLI launch command is:
 
 ```text
-ETH-PERP,BTC-PERP,DOGE-PERP,ZEC-PERP,HYPE-PERP,SOL-PERP,BNB-PERP
-```
-
-The current testnet subaccount can execute risk-universe-1 instruments such as ETH/BTC. Some other symbols may be rejected by Derive for that subaccount’s risk universe; the runner disables those instruments after the first rejection and keeps running.
-
-Derive testnet liquidity can be thin. Treat the v3 run as proof of authentication, market scanning, order creation, live status, and fault-tolerant execution; production liquidity remains the Hummingbot V2 mainnet lane.
-
-## Quick Start — Derive v3 Testnet
-
-```bash
-cp .env.example .env
-# fill DERIVE_SESSION_KEY, DERIVE_WALLET, DERIVE_SUBACCOUNT_ID, DERIVE_ETH_CHAIN
-bash scripts/start_flyby_v3_testnet.sh
-bash scripts/flyby_v3_status.sh
-```
-
-Useful overrides:
-
-```bash
-EXTRA_ARGS="--allow-default-orders" bash scripts/start_flyby_v3_testnet.sh
-CONTAINER=hb-derive-py ENV_FILE=.env bash scripts/flyby_v3_status.sh
-```
-
-Artifacts:
-
-```text
-hb_backtest/flyby_v3_testnet.jsonl
-/tmp/flyby_v3_testnet.log inside the container
-```
-
-## Quick Start — Research and Backtests
-
-```bash
-pip install -r requirements.txt
-
-# Guarded perps proxy
-python backtest/run_backtest.py --pair ETHUSDT --interval 1h --days 60 --thresh 2.5 --cesf_min 0.40 --plot
-
-# Expanded universe, options pricing, and plots
-PYTHONPATH=. python backtest/run_expanded.py
-
-# Point-in-time WFA harness
-PYTHONPATH=. python backtest/run_standard.py --pair ETHUSDT --interval 1h --days 60
-
-# Derive public SVI snapshot
-PYTHONPATH=. python src/venue/derive.py
-
-# Condor decision demo
-python -c "from agents.condor_agent import condor_options_demo; print(condor_options_demo())"
-```
-
-## Quick Start — Hummingbot V2 Mainnet Adapter
-
-```bash
-cp controllers/directional_trading/flyby.py <hummingbot>/controllers/directional_trading/
-cp conf/controllers/*.yml <hummingbot>/conf/controllers/
-cp conf/scripts/*.yml <hummingbot>/conf/scripts/
-```
-
-Then in Hummingbot:
-
-```text
-create --controller-config directional_trading.flyby
 start --v2 conf_v2_flyby.yml
 ```
 
-## Strategy Snapshot
-
-| Layer | Implementation |
-|---|---|
-| Forecast | HAR-RV + EWMA λ=0.94 |
-| Surface | SVI per expiry with no-arb checks |
-| Pricing | Black76 options pricing |
-| Event filter | CESF crash-mass proxy: tail, kurtosis, clustering, forecast disagreement |
-| Decision | Condor `decide(snapshot)` selects OTM, ATM, trend, or strangle regime |
-| Sizing | Half-Kelly from edge and uncertainty |
-| Guard | Gross, per-underlying, delta, vega, gamma, margin, daily loss, and peak loss limits |
-| Execution | Derive option where supported; Derive perp fallback/proof lane |
-
-## Backtest Summary
-
-Backtests use live Binance klines as proxy history, 1h candles, $800 start, fees and slippage, one-bar point-in-time lag, 60/40 WFA, and Guard enabled.
-
-| Surface | Result |
-|---|---|
-| Perps proxy | ETH 1h 60d positive guarded run, low drawdown |
-| Options model | Same signal becomes convex through Black76/SVI options pricing |
-| WFA | OOS remains positive in the documented ETH 1h run |
-
-The detailed table and plots are in [`strategy.md`](strategy.md).
-
-## Repository Layout
-
-```text
-agents/                         Condor agent decision logic
-controllers/directional_trading/ Hummingbot V2 controller
-conf/                           Hummingbot controller and script configs
-run_flyby_v3_testnet.py          Derive v3 testnet runner
-scripts/                        Start/status scripts
-src/svi/                        SVI surface fitting
-src/forecast/                   HAR-RV + EWMA
-src/pricing/                    Black76 pricing
-src/risk/                       PortfolioGuard
-src/collateral/                 Multi-collateral model
-src/venue/                      Derive public data helpers
-backtest/                       Backtest and WFA harnesses
-hb_backtest/                    Testnet and proof artifacts
-```
-
-## Botcamp Context
-
-Official/public material for the Agent Builders Cup describes $800 starting capital, Hummingbot V2 Controller or Condor Agent eligibility, sponsor teams including Derive, a 48h finals format, and public ranking surfaces including volume, P&L, and HBOT vote.
-
-Flyby’s submission answer is: Derive-native volatility and options edge, deterministic risk controls, and a live v3 testnet proof path that does not disturb the V2 mainnet adapter.
-
-## Competition Safety Contract (V2 Mainnet Lane)
-
-The V2 competition profile is intentionally conservative:
-
-- Venue boundary: the Hummingbot Derive adapter owns data, trading rules, orders, fills, balances, positions, fees, and funding. The Condor policy selects a bounded regime from a normalized snapshot; executors place orders.
-- Live perpetual candidates: `ETH-PERP`, `BTC-PERP`, `SOL-PERP`, `HYPE-PERP`, subject to adapter discovery and minimum-order rules.
-- Options disabled by default; ETH/BTC eligibility only after first-class adapter capability tests.
-- ARB, AVAX, OP: research/backtest only.
-- Accounting: `src/accounting/` applies fill and funding events idempotently by venue IDs across restarts; reconciliation blocks new entries on stale data, unknown orders, unsupported symbols, margin failure, or drift.
-- Readiness: see `COMPETITION_READINESS.md`. Launch gate is a 24-36h adapter soak; a separate 120h shadow/testnet campaign is additional evidence, not pre-competition proof.
-- Public/private boundary: see `PUBLIC_RELEASE_POLICY.md`. Credentials, account identifiers, raw fills, and operational logs stay outside GitHub.
-- Creds-free monitor: `scripts/live_testnet_scan.py` polls public testnet marks + Condor regimes, no orders, no credentials.
-- Current testnet execution (Sep 30): ETH/BTC only. SOL/DOGE/ZEC/BNB/HYPE auto-skipped (account risk-1 vs instrument risk-2/3, empty books). Market orders via `--market` after limits rested unfilled.
-
-Local verification:
-
-```bash
-pip install -r requirements.txt
-python3 -m compileall -q agents controllers src tests
-PYTHONPATH=. python3 tests/test_condor_hummingbot.py
-PYTHONPATH=. python3 -m unittest tests.test_accounting tests.test_competition_profile
-```
+This session did not start a trading bot or submit any orders. Downloading
+and testing v2.17 does not upgrade an existing API/Condor deployment: those
+follow independent continuous releases.

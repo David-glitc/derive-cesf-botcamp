@@ -1,241 +1,448 @@
-#!/usr/bin/env python3
-"""
-Mock Hummingbot test for Flyby + Condor
-
-Since hummingbot isn't pip-installed in this VPS, we mock the
-Hummingbot classes and run flyby.py / condor_agent.py end-to-end
-with real Binance klines — same path Hummingbot would take:
-
-  MarketDataProvider.get_candles_df() → Flyby.update_processed_data() → Condor decide() → get_executor_config()
-
-Run: PYTHONPATH=. python tests/test_condor_hummingbot.py
-"""
-import sys
+"""Real v2.17 models + controller ticks; adapter data fixtures, no exchange orders."""
+import asyncio
+from decimal import Decimal
+from types import SimpleNamespace
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import tempfile
+import json
+import subprocess
+import sys
 
-import types, sys as _sys
-
-# ── Mock hummingbot modules if not installed ─────────────────────
-try:
-    import hummingbot  # noqa
-    HAS_HB = True
-except ImportError:
-    HAS_HB = False
-    # Create minimal mock modules so flyby.py can import
-    for mod in [
-        "hummingbot", "hummingbot.core", "hummingbot.core.data_type",
-        "hummingbot.core.data_type.common", "hummingbot.data_feed",
-        "hummingbot.data_feed.candles_feed", "hummingbot.data_feed.candles_feed.data_types",
-        "hummingbot.strategy_v2", "hummingbot.strategy_v2.controllers",
-        "hummingbot.strategy_v2.controllers.directional_trading_controller_base",
-        "hummingbot.strategy_v2.executors", "hummingbot.strategy_v2.executors.position_executor",
-        "hummingbot.strategy_v2.executors.position_executor.data_types",
-    ]:
-        _sys.modules[mod] = types.ModuleType(mod)
-
-    # Mock TradeType
-    ct = _sys.modules["hummingbot.core.data_type.common"]
-    class TradeType:
-        BUY = 1
-        SELL = 2
-    ct.TradeType = TradeType
-
-    # Mock CandlesConfig
-    cmod = _sys.modules["hummingbot.data_feed.candles_feed.data_types"]
-    from dataclasses import dataclass
-    @dataclass
-    class CandlesConfig:
-        connector: str
-        trading_pair: str
-        interval: str
-        max_records: int
-    cmod.CandlesConfig = CandlesConfig
-
-    # Mock base controller
-    base_mod = _sys.modules["hummingbot.strategy_v2.controllers.directional_trading_controller_base"]
-    from pydantic import BaseModel
-    class DirectionalTradingControllerConfigBase(BaseModel):
-        connector_name: str = "derive"
-        trading_pair: str = "ETH-PERP"
-        total_amount_quote: float = 800
-        class Config:
-            arbitrary_types_allowed = True
-    class DirectionalTradingControllerBase:
-        def __init__(self, config, *args, **kwargs):
-            self.config = config
-            self.market_data_provider = None
-            self.processed_data = {}
-    base_mod.DirectionalTradingControllerConfigBase = DirectionalTradingControllerConfigBase
-    base_mod.DirectionalTradingControllerBase = DirectionalTradingControllerBase
-
-    # Mock PositionExecutorConfig
-    pos_mod = _sys.modules["hummingbot.strategy_v2.executors.position_executor.data_types"]
-    pos_mod.PositionExecutorConfig = object  # will be patched in flyby
-
-    # Mock pandas_ta import
-    _sys.modules["pandas_ta"] = types.ModuleType("pandas_ta")
-
-print(f"[mock] hummingbot installed: {HAS_HB} — using mock: {not HAS_HB}")
-
-# ── Now import Flyby + Condor after mocks ────────────────────────
 import pandas as pd
 import numpy as np
-from unittest.mock import MagicMock
-from decimal import Decimal
+import pytest
+import yaml
 
-# Patch PositionExecutorConfig for our mock before importing flyby
-import hummingbot.strategy_v2.executors.position_executor.data_types as pos_dt
-from dataclasses import dataclass
-@dataclass
-class MockPosConfig:
-    timestamp: float
-    connector_name: str
-    trading_pair: str
-    side: object
-    entry_price: Decimal
-    amount: Decimal
-    leverage: int
-    position_mode: str
-    stop_loss: float
-    take_profit: float
-    time_limit: int
-    trailing_stop: object
-    coerce_tp_to_limit: bool
-pos_dt.PositionExecutorConfig = MockPosConfig
+pytest.importorskip("hummingbot", reason="Run this suite in the pinned Hummingbot image")
+from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.strategy_v2.models.executors_info import ExecutorInfo
+from hummingbot.strategy_v2.models.base import RunnableStatus
+from controllers.directional_trading.flyby import DeriveCesfLongVolConfig, DeriveCesfLongVolController
+from tests.test_flyby_policy import candles
 
-# Import Flyby controller and Condor
-import importlib.util, pathlib
-spec = importlib.util.spec_from_file_location("flyby_mod", "controllers/directional_trading/flyby.py")
-flyby_mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(flyby_mod)
-FlybyController = flyby_mod.DeriveCesfLongVolController
-FlybyConfig = flyby_mod.DeriveCesfLongVolConfig
+ROOT = Path(__file__).resolve().parents[1]
 
-from agents.condor_agent import decide, decide_active, condor_options_demo
 
-# ── Fetch real klines for mock provider ──────────────────────────
-from backtest.run_expanded import fetch
+def test_pinned_connectors_do_not_accept_option_instrument_rules():
+    from hummingbot.connector.derivative.derive_perpetual.derive_perpetual_derivative import DerivePerpetualDerivative
+    from hummingbot.connector.exchange.derive.derive_exchange import DeriveExchange
+    option = {"instrument_type": "option", "instrument_name": "ETH-20261004-3000-C", "is_active": True}
+    for connector_class in (DerivePerpetualDerivative, DeriveExchange):
+        instance = connector_class.__new__(connector_class)
+        assert asyncio.run(instance._format_trading_rules([option])) == []
 
-print("\n[1] Fetching ETH-PERP proxy klines (Binance ETHUSDT 1h)...")
-df = fetch("ETHUSDT", "1h", 60)
-print(f"    got {len(df)} candles {df['open_time'].iloc[0]} → {df['open_time'].iloc[-1]}")
 
-# ── Build mock market_data_provider ──────────────────────────────
-mock_provider = MagicMock()
-mock_provider.get_candles_df.return_value = df
-mock_provider.time.return_value = 1_700_000_000
+class Provider:
+    ready = True
+    def __init__(self):
+        self.now = 1800000000.0
+        self.frame = candles(180)
+        self.frame["timestamp"] = self.now - (180 - pd.Series(range(180))) * 300
+        price = float(self.frame.close.iloc[-1])
+        self.book = SimpleNamespace(last_diff_uid=1, snapshot=(
+            pd.DataFrame({"price": [price * .9999], "amount": [10]}),
+            pd.DataFrame({"price": [price * 1.0001], "amount": [10]})))
+        self.connector = SimpleNamespace(domain="derive_perpetual", _subacct_id=42, ready=True, _user_stream_tracker=SimpleNamespace(last_recv_time=self.now),
+            _instrument_ticker=[{"instrument_name": "ETH-PERP", "taker_fee_rate": ".0003",
+                                 "maker_fee_rate": ".0001", "base_fee": ".01"}],
+            account_positions={}, in_flight_orders={}, get_balance=lambda _: Decimal("800"),
+            get_available_balance=lambda _: Decimal("800"), get_order_book=lambda _: self.book,
+            quantize_order_amount=lambda pair, amount: amount.quantize(Decimal(".001"), rounding="ROUND_DOWN"),
+            trading_rules={"ETH-USDC": SimpleNamespace(min_order_size=Decimal(".001"), min_notional_size=Decimal("1"),
+                min_base_amount_increment=Decimal(".001"), min_price_increment=Decimal(".01"), max_order_size=Decimal("Infinity"))},
+            FLYBY_COMPATIBILITY_VERSION="flyby-derive-2.17.0-r1",
+            _flyby_account_state={"equity": Decimal("800"), "available": Decimal("800"), "open_orders": [],
+                "source": "authenticated_legacy_get_subaccount", "observed_at": self.now})
 
-# ── Test 1: Flyby conservative ───────────────────────────────────
-print("\n[2] Testing Flyby (conservative, condor_active=False)...")
-cfg = FlybyConfig(
-    connector_name="derive",
-    trading_pair="ETH-PERP",
-    candles_connector="derive",
-    candles_trading_pair="ETH-PERP",
-    interval="1h",
-    vol_lookback=100,
-    iv_threshold_vol=2.5,
-    cesf_min_score=0.40,
-    svi_skew_threshold=2.0,
-    kelly_cap=0.08,
-    max_fraction=0.05,
-    regime="auto",
-    leverage=3,
-    condor_active=False,
-)
-ctl = FlybyController(cfg)
-ctl.market_data_provider = mock_provider
+    def time(self): return self.now
+    def get_connector(self, name): return self.connector
+    def get_candles_df(self, **kwargs): return self.frame
+    def initialize_rate_sources(self, pairs): pass
+    def initialize_candles_feed(self, config): self.candle_config = config
 
-import asyncio
-asyncio.run(ctl.update_processed_data())
 
-print(f"    processed_data keys: {list(ctl.processed_data.keys())}")
-for k in ["signal","regime","venue","cesf_score","edge","skew","kelly_frac","derive_perp","derive_bonuses"]:
-    print(f"    {k}: {ctl.processed_data.get(k)}")
+def controller(tmp_path):
+    provider = Provider()
+    config = DeriveCesfLongVolConfig(id="contract-test", trading_pair="ETH-USDC")
+    instance = DeriveCesfLongVolController(config, provider, asyncio.Queue())
+    instance._risk_path = tmp_path / "risk.json"
+    asyncio.run(instance.update_processed_data())
+    assert instance.processed_data["reason"] == "stale_order_book"
+    provider.book.last_diff_uid += 1
+    asyncio.run(instance.update_processed_data())
+    # Explicit high-quality adapter fixture. The separate candle/action test
+    # below still derives its actual signal from raw causal candles.
+    instance.processed_data.update(trend_z=1.9, previous_trend_z=1.8, efficiency=.8,
+                                   previous_efficiency=.8, volume_ratio=1.8, previous_volume_ratio=1.8)
+    return instance, provider
 
-# Condor decide from same snapshot
-snap = dict(
-    cesf_score=ctl.processed_data["cesf_score"],
-    edge=ctl.processed_data["edge"],
-    svi_skew=ctl.processed_data["skew"],
-    momentum=ctl.processed_data["momentum"],
-    epsilon=ctl.processed_data["forecast_epsilon"],
-    ccy="ETH", spot=float(df["close"].iloc[-1]),
-    stale_secs=0, daily_pnl_pct=0,
-)
-dec = decide(snap)
-dec_a = decide_active(snap)
-print(f"\n    Condor decide (conservative): {dec.regime} | {dec.reason[:90]}")
-print(f"    Condor decide (ACTIVE):       {dec_a.regime} | {dec_a.reason[:90]}")
-print(f"    Condor options demo: {condor_options_demo(spot=float(df['close'].iloc[-1]))}")
 
-# Test executor config if signal !=0
-sig = ctl.processed_data["signal"]
-if sig != 0:
-    # Mock TradeType
-    from hummingbot.core.data_type.common import TradeType
-    side = TradeType.BUY if sig==1 else TradeType.SELL
-    exec_cfg = ctl.get_executor_config(side, Decimal(str(df["close"].iloc[-1])), Decimal("0.01"))
-    print(f"\n    Executor config (signal {sig}): connector={exec_cfg.connector_name} pair={exec_cfg.trading_pair} lev={exec_cfg.leverage} SL={exec_cfg.stop_loss} TP={exec_cfg.take_profit} TL={exec_cfg.time_limit}")
-else:
-    print(f"\n    No signal (flat) — no executor, as designed (precision > recall)")
+def executor_info(config, **overrides):
+    values = dict(id="executor-one", timestamp=config.timestamp, type="position_executor", config=config,
+                  status=RunnableStatus.RUNNING, net_pnl_pct=0, net_pnl_quote=0, cum_fees_quote=0,
+                  filled_amount_quote=0, is_active=True, is_trading=True,
+                  custom_info={"side": config.side, "order_ids": ["owned-order"]})
+    return ExecutorInfo(**{**values, **overrides})
 
-# ── Test 2: Flyby ACTIVE ─────────────────────────────────────────
-print("\n[3] Testing Flyby ACTIVE (condor_active=True, more volume)...")
-cfg_a = FlybyConfig(
-    connector_name="derive", trading_pair="ETH-PERP",
-    candles_connector="derive", candles_trading_pair="ETH-PERP",
-    interval="1h", vol_lookback=100, iv_threshold_vol=2.0, cesf_min_score=0.27,
-    condor_active=True,
-)
-ctl_a = FlybyController(cfg_a)
-ctl_a.market_data_provider = mock_provider
-asyncio.run(ctl_a.update_processed_data())
-print(f"    ACTIVE regime: {ctl_a.processed_data.get('regime')} venue={ctl_a.processed_data.get('venue')} signal={ctl_a.processed_data.get('signal')}")
-print(f"    cesf {ctl_a.processed_data['cesf_score']:.3f} edge {ctl_a.processed_data['edge']:.4f} skew {ctl_a.processed_data['skew']:.2f}")
 
-# ── Test 3: Synthetic trigger (force cheap vol + crash-mass) ───────
-print("\n[3b] Synthetic trigger — should BUY (OTM 25Δ via Condor) ...")
-import pandas as _pd
-import numpy as _np
-# Build synthetic closes: 100 flat bars then 1 crash-like bar to pump cesf+edge
-closes = _np.concatenate([_np.full(110, 3000.0), _np.linspace(3000, 2950, 20), _np.full(10, 2950.0)])
-rets_syn = _np.diff(_np.log(closes))
-# Create df with those closes
-df_syn = _pd.DataFrame({"close": closes, "high": closes*1.01, "low": closes*0.99, "open": closes})
-# Need ATR col — mock by adding dummy
-df_syn["open_time"] = pd.date_range("2026-09-01", periods=len(df_syn), freq="h")
-mock_syn = MagicMock()
-mock_syn.get_candles_df.return_value = df_syn
-mock_syn.time.return_value = 1_700_000_000
-cfg_syn = FlybyConfig(connector_name="derive", trading_pair="ETH-PERP", candles_connector="derive", candles_trading_pair="ETH-PERP", iv_threshold_vol=1.5, cesf_min_score=0.30, condor_active=False)
-ctl_syn = FlybyController(cfg_syn)
-ctl_syn.market_data_provider = mock_syn
-asyncio.run(ctl_syn.update_processed_data())
-print(f"    synthetic cesf {ctl_syn.processed_data['cesf_score']:.3f} edge {ctl_syn.processed_data['edge']:.4f} skew {ctl_syn.processed_data['skew']:.2f} → regime {ctl_syn.processed_data['regime']} signal {ctl_syn.processed_data['signal']} venue {ctl_syn.processed_data['venue']}")
-# Force Condor synthetic snap for OTM
-snap_otm = dict(cesf_score=0.45, edge=0.02, svi_skew=2.5, momentum=0.0, epsilon=0.045, ccy="ETH", spot=2950, stale_secs=0, daily_pnl_pct=0)
-print(f"    Condor OTM snap → {decide(snap_otm)}")
-print(f"    Condor OTM ACTIVE → {decide_active(snap_otm)}")
-if ctl_syn.processed_data["signal"] != 0:
-    from hummingbot.core.data_type.common import TradeType
-    side = TradeType.BUY if ctl_syn.processed_data["signal"]==1 else TradeType.SELL
-    ec = ctl_syn.get_executor_config(side, Decimal(str(closes[-1])), Decimal("0.02"))
-    print(f"    Synthetic executor: {ec.connector_name} {ec.trading_pair} TP={ec.take_profit} SL={ec.stop_loss} TL={ec.time_limit}")
+def test_actual_models_serialize_nonempty_exits(tmp_path):
+    ctl, provider = controller(tmp_path)
+    assert not ctl.processed_data["halt"]
+    config = ctl.get_executor_config(TradeType.BUY, Decimal("3000"), Decimal(".01"))
+    barrier = config.model_dump()["triple_barrier_config"]
+    assert barrier["stop_loss"] > 0 and barrier["take_profit"] > 0 and barrier["time_limit"] > 0
+    assert barrier["stop_loss_order_type"] == OrderType.MARKET
+    assert barrier["open_order_type"] == OrderType.LIMIT
+    assert ctl.processed_data["options_execution"]["live_execution_verified"] is False
+    assert ctl.processed_data["execution_environment"]["network"] == "mainnet"
 
-# ── Test 4: Multi-pair loop (4-agent book) ───────────────────────
-print("\n[4] Testing 4-agent book (ETH/ARB/SOL/AVAX) — one tick each...")
-for pair, conf_pair in [("ETHUSDT","ETH-PERP"),("ARBUSDT","ARB-PERP"),("SOLUSDT","SOL-PERP"),("AVAXUSDT","AVAX-PERP")]:
-    dfp = fetch(pair, "1h", 60)
-    mp = MagicMock()
-    mp.get_candles_df.return_value = dfp
-    mp.time.return_value = 1_700_000_000
-    c = FlybyConfig(connector_name="derive", trading_pair=conf_pair, candles_connector="derive", candles_trading_pair=conf_pair)
-    ctlx = FlybyController(c)
-    ctlx.market_data_provider = mp
-    asyncio.run(ctlx.update_processed_data())
-    print(f"    {conf_pair:10} signal {ctlx.processed_data['signal']:2} regime {ctlx.processed_data['regime']:20} cesf {ctlx.processed_data['cesf_score']:.2f} venue {ctlx.processed_data['venue']}")
 
-print("\n✅ All mocked Hummingbot tests passed — Flyby + Condor wire correctly.")
-print("   For full Hummingbot (no mock): docker run hummingbot/hummingbot + mount ./controllers + ./conf")
+def test_custom_info_context_serialization_has_no_trading_side_effect(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctl, provider = controller(tmp_path)
+    provider.connector.api_secret = "SECRET_CONNECTOR"
+    ctl.processed_data["api_secret"] = "SECRET_DATA"
+    ctl.config.manual_kill_switch = True
+    before = dict(ctl.processed_data)
+    report = ctl.get_custom_info()
+    assert len(json.dumps(report)) < 1024 and report["flyby"]["paused"] is True
+    assert report["flyby"]["live_options"] is False
+    context = json.loads(Path(report["flyby"]["context_path"]).read_text())
+    assert "SECRET" not in json.dumps(context)
+    assert context["native_market"]["status"] == "unavailable_or_invalid"
+    assert ctl.processed_data == before and ctl.create_actions_proposal() == []
+
+
+def test_context_write_failure_does_not_block_protective_stops(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctl, provider = controller(tmp_path)
+    cfg = ctl.get_executor_config(TradeType.BUY, Decimal("3000"), Decimal(".01"))
+    ctl.executors_info = [executor_info(cfg)]
+    ctl.config.manual_kill_switch = True
+    def fail(*args): raise OSError("disk unavailable")
+    monkeypatch.setattr("controllers.directional_trading.flyby.atomic_owned_json", fail)
+    report = ctl.get_custom_info()
+    assert report["flyby"]["context_file_status"] == "unavailable"
+    assert len(ctl.stop_actions_proposal()) == 1
+
+
+def test_unexpected_advisory_failure_is_contained(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctl, provider = controller(tmp_path)
+    def fail(*args): raise RuntimeError("unexpected reporting failure")
+    monkeypatch.setattr("controllers.directional_trading.flyby.controller_context", fail)
+    assert ctl.get_custom_info()["flyby"]["context_status"] == "unavailable"
+
+
+def test_native_controller_opt_in_never_calls_binance_or_falls_back(tmp_path, monkeypatch):
+    from tests.test_native_data import snapshot, seal
+    from src.accounting.context import atomic_owned_json
+    monkeypatch.chdir(tmp_path)
+    provider = Provider()
+    native, _ = snapshot()
+    native["candles"] = provider.frame.to_dict("records")
+    native["features"]["valid"] = True
+    atomic_owned_json(Path("data/flyby-market-ETH.json"), seal(native), "derive_market_context")
+    cfg = DeriveCesfLongVolConfig(id="native-unit", trading_pair="ETH-USDC", signal_source="derive_native")
+    ctl = DeriveCesfLongVolController(cfg, provider, asyncio.Queue())
+    assert ctl.get_candles_config() == []
+    provider.get_candles_df = lambda **kw: (_ for _ in ()).throw(AssertionError("Binance must not be queried"))
+    asyncio.run(ctl.update_processed_data())
+    provider.book.last_diff_uid += 1
+    asyncio.run(ctl.update_processed_data())
+    assert ctl.processed_data["signal_source"] == "derive_native" and not ctl.processed_data["halt"]
+    provider.now += 6
+    provider.book.last_diff_uid += 1
+    asyncio.run(ctl.update_processed_data())
+    assert ctl.processed_data["halt"] and ctl.processed_data["reason"] == "invalid_native_context"
+    assert ctl.create_actions_proposal() == []
+
+
+@pytest.mark.parametrize("source,interval", [("unknown", "5m"), ("derive_native", "15m"), ("derive_native", "4h")])
+def test_native_input_contract_rejects_unsupported_modes(source, interval):
+    with pytest.raises(ValueError): DeriveCesfLongVolConfig(id="source-contract", signal_source=source, interval=interval)
+
+
+@pytest.mark.parametrize("domain", ["derive_perpetual_testnet", "derive_perpetual_paper_trade", None])
+def test_wrong_runtime_domain_cannot_create_or_stop_executors(tmp_path, domain):
+    ctl, provider = controller(tmp_path)
+    config = ctl.get_executor_config(TradeType.BUY, Decimal("3000"), Decimal(".01"))
+    ctl.executors_info = [executor_info(config)]
+    provider.connector.domain = domain
+    asyncio.run(ctl.update_processed_data())
+    assert ctl.processed_data["halt"]
+    assert ctl.processed_data["reason"] == "mainnet_connector_required"
+    assert ctl.processed_data["execution_environment"]["network"] == "mainnet"
+    assert ctl.stop_actions_proposal() == []
+    ctl.executors_info = []
+    ctl.processed_data.update(signal=1, halt=False, confidence=.8, atr_pct=.004)
+    assert ctl.create_actions_proposal() == []
+    with pytest.raises(ValueError, match="mainnet_connector_domain_required"):
+        ctl.get_executor_config(TradeType.BUY, Decimal("3000"), Decimal(".01"))
+
+
+def test_installed_mainnet_constants_match_submission_contract():
+    from agents.mainnet import validate_installed_endpoints
+    from hummingbot.connector.derivative.derive_perpetual import derive_perpetual_constants
+    validate_installed_endpoints(derive_perpetual_constants)
+
+
+def test_mainnet_preflight_cli_in_actual_hummingbot_environment():
+    result = subprocess.run([sys.executable, str(ROOT / "scripts/check_mainnet.py")],
+                            check=True, capture_output=True, text=True, timeout=30)
+    verdict = json.loads(result.stdout)
+    assert verdict["network"] == "mainnet"
+    assert verdict["connector"] == "derive_perpetual"
+    assert verdict["api_generation"] == "legacy_v2"
+    assert verdict["install_profiles_paused"] is True
+    assert verdict["account_verified"] is False
+    assert verdict["live_execution_verified"] is False
+    assert verdict["orders_submitted"] == 0
+
+
+def test_real_controller_shadow_options_are_not_live_execution(tmp_path):
+    from backtest.options_paper import smoke_rows
+    from src.options.paper import normalize_quote
+    ctl, provider = controller(tmp_path)
+    row = smoke_rows()[0]
+    ctl.processed_data.update(row["signal_snapshot"], available=800, equity=800)
+    quotes = []
+    for raw in row["chain"]:
+        raw["timestamp"] = provider.now
+        raw["expiry"] = provider.now + 3 * 86400
+        quotes.append(normalize_quote(raw)[0])
+    plan = ctl.plan_options(quotes, provider.now, .04)
+    assert plan is not None and plan.signal_only
+    assert plan.delta_verified and not plan.fees_verified
+    assert plan.gross_reference_quote <= 240 and abs(plan.net_delta_quote) <= 160
+    assert ctl.processed_data["options_delta"]["status"] == "fresh_shadow_plan"
+    assert ctl.config.options_enabled is False
+    assert ctl.processed_data["options_execution"]["orders_submitted"] == 0
+
+
+def test_option_plan_is_cleared_on_stale_or_unknown_account(tmp_path):
+    from backtest.options_paper import smoke_rows
+    from src.options.paper import normalize_quote
+    ctl, provider = controller(tmp_path)
+    row = smoke_rows()[0]
+    ctl.processed_data.update(row["signal_snapshot"], available=800, equity=800)
+    qs = []
+    for raw in row["chain"]:
+        raw.update(timestamp=provider.now, expiry=provider.now + 3 * 86400)
+        qs.append(normalize_quote(raw)[0])
+    assert ctl.plan_options(qs, provider.now, .04)
+    provider.connector.in_flight_orders["unknown"] = SimpleNamespace(client_order_id="unknown", amount=.01, price=3000)
+    assert ctl.plan_options(qs, provider.now, .04) is None
+    assert ctl.processed_data["spread_plan"] is None
+    provider.connector.in_flight_orders.clear()
+    provider.now += 6
+    assert ctl.plan_options(qs, provider.now, .04) is None
+
+
+def test_option_plan_costs_use_supplied_metadata_not_premium_fee_guess(tmp_path):
+    from backtest.options_paper import smoke_rows
+    from src.options.paper import normalize_quote
+    ctl, provider = controller(tmp_path)
+    row = smoke_rows()[0]
+    ctl.processed_data.update(row["signal_snapshot"], available=800, equity=800)
+    qs, fees = [], {}
+    for raw in row["chain"]:
+        raw.update(timestamp=provider.now, expiry=provider.now + 3 * 86400)
+        qs.append(normalize_quote(raw)[0])
+        fees[raw["instrument"]] = raw["fees"]
+    plan = ctl.plan_options(qs, provider.now, .04, fee_metadata=fees)
+    assert plan and plan.fees_verified and plan.max_loss <= 4
+    for metadata in fees.values():
+        metadata["base"] = 10
+    assert ctl.plan_options(qs, provider.now, .04, fee_metadata=fees) is None
+
+
+def test_fresh_public_chain_automatically_produces_only_shadow_context(tmp_path, monkeypatch):
+    from backtest.options_paper import smoke_rows
+    ctl, provider = controller(tmp_path)
+    row = smoke_rows()[0]
+    ctl.processed_data.update(row["signal_snapshot"], forecast_sigma=.8)
+    for q in row["chain"]:
+        q.update(timestamp=provider.now, expiry=provider.now + 3 * 86400,
+                 quoted=True, pricing={"iv": .5})
+    monkeypatch.setattr("controllers.directional_trading.flyby.load_market", lambda *args:
+                        {"perp": {"timestamp": provider.now, "index": ctl.processed_data["entry_mid"]}, "options": row["chain"]})
+    ctl._update_options_shadow(provider.now)
+    assert ctl.processed_data["spread_plan"]["fees_verified"]
+    assert ctl.processed_data["options_delta"]["delta_verified"]
+    assert not ctl.processed_data["options_delta"]["live_options"]
+    assert ctl.processed_data["options_execution"]["orders_submitted"] == 0
+    assert not provider.connector.in_flight_orders
+    previous_signal = ctl.processed_data["signal"]
+    monkeypatch.setattr("controllers.directional_trading.flyby.load_market", lambda *args: {})
+    ctl._update_options_shadow(provider.now)
+    assert ctl.processed_data["spread_plan"] is None
+    assert ctl.processed_data["signal"] == previous_signal
+
+
+def test_action_rechecks_state_and_shared_account_reservation(tmp_path):
+    ctl, provider = controller(tmp_path)
+    ctl.processed_data.update(signal=1, halt=False, confidence=.8, atr_pct=.004)
+    actions = ctl.create_actions_proposal()
+    assert len(actions) == 1
+    config = actions[0].executor_config
+    assert config.amount * config.entry_price <= Decimal("160")
+    assert config.triple_barrier_config.stop_loss is not None
+    assert ctl.create_actions_proposal() == []
+    ctl._last_entry = 0
+    ctl._reservations.pop(id(provider.connector), None)
+    provider.connector.in_flight_orders["unknown"] = SimpleNamespace(client_order_id="unknown", amount=.01, price=3000)
+    assert ctl.create_actions_proposal() == []
+
+
+def test_owned_position_is_not_automatically_closed_as_unknown(tmp_path):
+    ctl, provider = controller(tmp_path)
+    config = ctl.get_executor_config(TradeType.BUY, Decimal("3000"), Decimal(".05"))
+    ctl.executors_info = [executor_info(config)]
+    provider.connector.account_positions["ETH"] = SimpleNamespace(trading_pair="ETH-USDC", amount=.025,
+                                                                 entry_price=3000, unrealized_pnl=1)
+    account = ctl._account(provider.connector, provider.now)
+    assert account["reconciled"] and not account["entry_allowed"]
+    ctl.processed_data.update(signal=1, halt=False)
+    assert ctl.stop_actions_proposal() == []
+    provider.connector.account_positions["ETH"].amount = .10
+    assert not ctl._account(provider.connector, provider.now)["reconciled"]
+
+
+@pytest.mark.parametrize("fault,reason", [("private", "stale_user_stream"), ("gap", "candle_gap"),
+                                         ("crossed", "crossed_order_book"), ("empty", "empty_order_book"),
+                                         ("basis", "proxy_basis")])
+def test_real_controller_halts_for_feed_and_book_faults(tmp_path, fault, reason):
+    ctl, provider = controller(tmp_path)
+    if fault == "private": provider.connector._user_stream_tracker.last_recv_time -= 121
+    if fault == "gap": provider.frame.loc[150, "timestamp"] -= 60
+    if fault == "crossed": provider.book.snapshot[0].loc[0, "price"] *= 2
+    if fault == "empty": provider.book.snapshot = (pd.DataFrame(), pd.DataFrame())
+    if fault == "basis": provider.frame["close"] *= 2
+    asyncio.run(ctl.update_processed_data())
+    assert ctl.processed_data["reason"] == reason
+    assert ctl.create_actions_proposal() == []
+
+
+def test_pending_entry_timeout_and_invalid_signal_close(tmp_path):
+    ctl, provider = controller(tmp_path)
+    config = ctl.get_executor_config(TradeType.BUY, Decimal("3000"), Decimal(".05"))
+    ctl.executors_info = [executor_info(config, timestamp=provider.now - 31, is_trading=False)]
+    ctl.processed_data.update(signal=1, halt=False)
+    assert len(ctl.stop_actions_proposal()) == 1
+    ctl.executors_info[0].is_trading = True
+    ctl.processed_data["signal"] = 0
+    assert len(ctl.stop_actions_proposal()) == 1
+
+
+@pytest.mark.parametrize("profile", ["eth", "btc", "sol", "hype"])
+def test_all_submitted_profiles_validate_against_actual_hb(profile):
+    config = yaml.safe_load((ROOT / f"conf/controllers/conf_flyby_{profile}.yml").read_text())
+    DeriveCesfLongVolConfig(**config)
+
+
+@pytest.mark.parametrize("change", [dict(connector_name="derive"), dict(position_mode="HEDGE"),
+                                   dict(connector_name="derive_perpetual_testnet"),
+                                   dict(connector_name="derive_perpetual_paper_trade"),
+                                   dict(options_enabled=True), dict(interval="3m"), dict(leverage=20),
+                                   dict(candles_connector="derive"), dict(candles_trading_pair="BTC-USDT")])
+def test_incompatible_live_configuration_is_rejected(change):
+    with pytest.raises(ValueError):
+        DeriveCesfLongVolConfig(id="invalid", trading_pair="ETH-USDC", **change)
+
+
+def test_mutated_config_cannot_bypass_mainnet_contract(tmp_path):
+    ctl, provider = controller(tmp_path)
+    with pytest.raises(ValueError, match="requires mainnet"):
+        ctl.config.connector_name = "derive_perpetual_testnet"
+    # Deliberate low-level corruption also cannot bypass the action boundary.
+    object.__setattr__(ctl.config, "connector_name", "derive_perpetual_testnet")
+    ctl.processed_data.update(signal=1, halt=False, confidence=.8, atr_pct=.004)
+    assert ctl.create_actions_proposal() == []
+    assert ctl.stop_actions_proposal() == []
+    with pytest.raises(ValueError, match="mainnet_connector_name_required"):
+        ctl.get_executor_config(TradeType.BUY, Decimal("3000"), Decimal(".01"))
+
+
+def test_closed_candles_to_actual_controller_action_queue(tmp_path):
+    ctl, provider = controller(tmp_path)
+    # Causal high-confidence movement/volume fixture, not a manually forced decision.
+    close = 3000 * np.exp(np.cumsum(.0005 + np.random.default_rng(77).normal(0, .0001, 180)))
+    opening = np.r_[close[0], close[:-1]]
+    provider.frame.loc[:, "open"] = opening
+    provider.frame.loc[:, "close"] = close
+    provider.frame.loc[:, "high"] = close * 1.002
+    provider.frame.loc[:, "low"] = opening * .998
+    provider.frame.loc[:, "volume"] = 100.0
+    provider.frame.loc[176:, "volume"] = 300.0
+    provider.book.snapshot[0].loc[0, "price"] = close[-1] * .9999
+    provider.book.snapshot[1].loc[0, "price"] = close[-1] * 1.0001
+    ctl.initialize_candles()
+    assert provider.candle_config.connector == "binance_perpetual"
+    ctl.executors_update_event.set()
+    asyncio.run(ctl.control_task())
+    assert ctl.processed_data["signal"] == 1, ctl.processed_data
+    actions = ctl.actions_queue.get_nowait()
+    assert len(actions) == 1 and actions[0].executor_config.side == TradeType.BUY
+    assert actions[0].executor_config.triple_barrier_config.stop_loss > 0
+    assert not ctl.executors_update_event.is_set()
+
+
+def test_risk_checkpoint_reload_and_invalid_checkpoint_fail_closed(tmp_path):
+    ctl, provider = controller(tmp_path)
+    ctl._risk.update(day_equity="830", peak="840")
+    import json
+    ctl._risk_path.write_text(json.dumps(ctl._risk))
+    other = DeriveCesfLongVolController(ctl.config, provider, asyncio.Queue())
+    other._risk = json.loads(ctl._risk_path.read_text())
+    other._risk_path = ctl._risk_path
+    account = other._account(provider.connector, provider.now)
+    assert account["daily_pnl_pct"] < -.02 and account["peak_dd"] < -.04
+    other._risk_error = True
+    with pytest.raises(ValueError, match="checkpoint"):
+        other._account(provider.connector, provider.now)
+
+
+def test_ordinary_interbar_age_does_not_invent_a_stale_feed(tmp_path):
+    ctl, provider = controller(tmp_path)
+    provider.now += 120
+    provider.connector._user_stream_tracker.last_recv_time = provider.now
+    provider.book.last_diff_uid += 1
+    asyncio.run(ctl.update_processed_data())
+    assert ctl.processed_data["reason"] != "stale_candles"
+
+
+def test_paused_profile_never_creates_an_executor(tmp_path):
+    ctl, provider = controller(tmp_path)
+    ctl.config.manual_kill_switch = True
+    ctl.processed_data.update(signal=1, halt=False, confidence=.9, atr_pct=.004)
+    assert ctl.create_actions_proposal() == []
+
+
+def test_bad_controller_id_is_rejected():
+    with pytest.raises(ValueError, match="identifier"):
+        DeriveCesfLongVolConfig(id="../../state", trading_pair="ETH-USDC")
+
+
+def test_current_venue_minimum_blocks_without_raising_caps(tmp_path):
+    ctl, provider = controller(tmp_path)
+    provider.connector.trading_rules["ETH-USDC"].min_order_size = Decimal(".1")
+    ctl.processed_data.update(signal=1, halt=False, confidence=.9, atr_pct=.004)
+    assert ctl.create_actions_proposal() == []
+    assert ctl.processed_data["entry_block"] == "venue_minimum_exceeds_budget"
+    assert ctl.config.max_notional_fraction == .20
+    assert ctl.processed_data["venue_minimum_notional"] > 160
+
+
+def test_stock_connector_and_missing_margin_cannot_authorize_entries(tmp_path):
+    ctl, provider = controller(tmp_path)
+    del provider.connector.FLYBY_COMPATIBILITY_VERSION
+    asyncio.run(ctl.update_processed_data())
+    assert ctl.processed_data["reason"] == "reviewed_connector_compatibility_required"
+    assert ctl.create_actions_proposal() == []
+    provider.connector.FLYBY_COMPATIBILITY_VERSION = "flyby-derive-2.17.0-r1"
+    provider.connector._flyby_account_state = None
+    provider.book.last_diff_uid += 1
+    asyncio.run(ctl.update_processed_data())
+    assert ctl.processed_data["reason"] == "verified_margin_unavailable"
+    assert ctl.create_actions_proposal() == []

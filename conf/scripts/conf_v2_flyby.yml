@@ -1,9 +1,9 @@
-# Competition live profile. The Derive/Hummingbot adapter is the only venue
-# boundary; options are capability-gated and are not enabled by this profile.
+# Mainnet only. Team selects enabled universe after account/rules preflight.
+# Defaults to ETH only; uncomment approved profiles deliberately.
 id: v2-flyby
 script_name: v2_with_controllers
 controllers_config:
   - conf_flyby_eth.yml
-  - conf_flyby_btc.yml
-  - conf_flyby_sol.yml
-  - conf_flyby_hype.yml
+  # - conf_flyby_btc.yml
+  # - conf_flyby_sol.yml
+  # - conf_flyby_hype.yml

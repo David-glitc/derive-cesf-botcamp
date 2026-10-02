@@ -11,10 +11,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 from typing import Any, Dict, Iterable
+import math
 
 
 def _decimal(value: Any) -> Decimal:
-    return Decimal(str(value or 0))
+    result = Decimal(str(0 if value is None else value))
+    if not result.is_finite():
+        raise ValueError("non-finite accounting value")
+    return result
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,15 @@ class FillEvent:
     funding: Decimal = Decimal("0")
     liquidity_role: str = "unknown"
     timestamp: float = 0.0
+
+    def __post_init__(self):
+        if not self.trade_id or not self.instrument or self.side not in ("buy", "sell"):
+            raise ValueError("invalid fill identity/side")
+        for name in ("amount", "price", "fee", "rebate", "realized_pnl", "realized_pnl_ex_fees", "funding"):
+            if not getattr(self, name).is_finite():
+                raise ValueError("non-finite fill")
+        if self.amount <= 0 or self.price <= 0 or min(self.fee, self.rebate) < 0 or not math.isfinite(self.timestamp):
+            raise ValueError("invalid fill amounts")
 
     @classmethod
     def from_mapping(cls, value: Dict[str, Any]) -> "FillEvent":
@@ -62,6 +75,10 @@ class FundingEvent:
     instrument: str
     amount: Decimal
     timestamp: float = 0.0
+
+    def __post_init__(self):
+        if not self.event_id or not self.instrument or not self.amount.is_finite() or not math.isfinite(self.timestamp):
+            raise ValueError("invalid funding event")
 
     @classmethod
     def from_mapping(cls, value: Dict[str, Any]) -> "FundingEvent":
@@ -94,6 +111,8 @@ class AccountingLedger:
     def apply_fill(self, event: FillEvent | Dict[str, Any]) -> bool:
         event = event if isinstance(event, FillEvent) else FillEvent.from_mapping(event)
         if event.trade_id in self.state.fills:
+            if self.state.fills[event.trade_id] != event:
+                raise ValueError("conflicting duplicate fill")
             return False
         self.state.fills[event.trade_id] = event
         self.state.volume_quote += abs(event.amount * event.price)
@@ -107,6 +126,8 @@ class AccountingLedger:
     def apply_funding(self, event: FundingEvent | Dict[str, Any]) -> bool:
         event = event if isinstance(event, FundingEvent) else FundingEvent.from_mapping(event)
         if event.event_id in self.state.funding_events:
+            if self.state.funding_events[event.event_id] != event:
+                raise ValueError("conflicting duplicate funding")
             return False
         self.state.funding_events[event.event_id] = event
         self.state.funding += event.amount

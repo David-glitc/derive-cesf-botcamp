@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flyby-competition"
+version = "0.2.0"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.24", "pandas>=2.0", "pydantic>=2.0", "requests>=2.31", "websockets>=13"]
+
+[project.optional-dependencies]
+verification = ["z3-solver==4.16.0.0"]
+
+[tool.setuptools.packages.find]
+include = ["agents*", "src.signal*", "src.risk*", "src.options*", "src.accounting*", "src.data*", "src.execution*"]
+namespaces = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

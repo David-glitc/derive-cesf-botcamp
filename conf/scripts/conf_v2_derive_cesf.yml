@@ -1,9 +1,0 @@
-# Legacy script name retained for compatibility. Uses the sanitized
-# capability-gated competition profile; no synthetic markets are loaded.
-id: v2-derive-cesf
-script_name: v2_with_controllers
-controllers_config:
-  - conf_flyby_eth.yml
-  - conf_flyby_btc.yml
-  - conf_flyby_sol.yml
-  - conf_flyby_hype.yml

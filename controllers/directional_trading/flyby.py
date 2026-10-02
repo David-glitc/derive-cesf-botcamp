@@ -1,251 +1,538 @@
+"""Flyby V2 controller: causal Condor policy, bounded perp execution.
+
+Requires Hummingbot v2.17.0. Option spreads are plans; this controller never
+submits unmatched option legs through a perpetual position executor.
 """
-Flyby — Derive CESF (Causal Event Space Framework) · competition profile.
+from __future__ import annotations
 
-The checked-in live profile is perpetual-first and capability-gated. The
-controller consumes Hummingbot/Derive data and emits Hummingbot executor
-configs; it does not place direct venue orders or claim unverified options,
-multi-collateral, or portfolio-margin execution.
-
-Standalone V2 controller, no private deps. Hummingbot-native.
-Venue: Derive perpetuals through the Hummingbot adapter.
-       Candle feed: adapter-provided data, with Binance klines only for research.
-
-Edge stack:
-  1) SVI surface per expiry → IV(K) for ATM (k=0) and 25Δ wings (k≈±0.3)  [src/svi]
-  2) HAR-RV + EWMA ensemble → forecast_sigma, epsilon                     [src/forecast]
-  3) CESF crash-mass → score [0,1]                                        [src/regimes]
-  4) Kelly trade sizing + local risk admission                              [src/risk]
-
-Capabilities such as options, multi-collateral, and portfolio margin are
-research/testnet surfaces until the installed adapter reports them and the
-contract tests prove their lifecycle.
-
-Regimes (src/regimes/catalog.py):
-  - scalp-long-put-atm      | ATM put  | edge>1.8 vol & CESF≥0.35 → Derive PERP short or ATM put option (primary +24%)
-  - scalp-long-put-otm-25d  | 25Δ put  | skew>2 vol & CESF≥0.40 → Derive OPTIONS 25Δ put (lower gamma, better Sharpe if smile rich)
-  - scalp-long-call-atm/otm | ATM/25Δ call | expansion
-  - strangle-long-otm       | 25Δ strangle | both wings cheap
-  - trend-ride-*/put        | ATM call/put | momentum 24×1h >1.2% + vol filter
-
-Risk: 1 position at a time, configurable stop/take-profit/time limits, and
-      adapter-reported account/margin state. Local limits are not a substitute
-      for Hummingbot/Derive risk controls.
-
-Usage:
-  create --controller-config directional_trading.derive_cesf_long_vol
-  create --v2-config v2_with_controllers
-  start --v2 conf_v2_derive_cesf.yml
-
-Condor Agent lane: agents/condor_agent.py decide(snapshot)→AgentDecision picks regime/thresh
-  within BANDS, routes OTM to Derive options (SVI+Black76), ATM to perps, logs collateral.
-"""
-
+from pathlib import Path
 from decimal import Decimal
-from typing import List
+from dataclasses import asdict
+from weakref import WeakSet
+import re
+
 import numpy as np
-import pandas_ta as ta  # noqa: F401
-from pydantic import Field, field_validator
-from pydantic_core.core_schema import ValidationInfo
-from hummingbot.core.data_type.common import TradeType
+from pydantic import Field, model_validator
+
+from agents.condor_agent import decide
+from agents.mainnet import MAINNET_CONNECTOR, execution_environment, require_mainnet_connector
+from src.accounting.context import atomic_owned_json, controller_context, context_summary, context_path, load_market
+from src.accounting.derive_margin import require_margin_state
+from src.execution.derive_hb import COMPATIBILITY_VERSION
+from src.risk.venue_sizing import venue_size
+from src.risk.competition import POLICY, RiskCheckpoint, account_binding, scalp_exits, exit_signal_reason
+from src.signal.flyby import INTERVAL_SECONDS, feature_frame
+from src.risk.position_sizing import depth_quote, dynamic_exits, risk_size, cost_allows_entry
+from src.options.spread_builder import build_spread
+from src.options.paper import live_options_status, normalize_quote
+from src.options.ranking import costed_plan
+from src.options.delta import account_policy, delta_context
+from hummingbot.core.data_type.common import TradeType, PositionMode, OrderType
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig
 from hummingbot.strategy_v2.controllers.directional_trading_controller_base import (
     DirectionalTradingControllerBase, DirectionalTradingControllerConfigBase,
 )
-from hummingbot.strategy_v2.executors.position_executor.data_types import PositionExecutorConfig
+from hummingbot.strategy_v2.executors.position_executor.data_types import PositionExecutorConfig, TripleBarrierConfig
+from hummingbot.strategy_v2.models.executor_actions import CreateExecutorAction, StopExecutorAction
 
-# --- Inlined forecasting (no src import — keeps controller portable for Hummingbot) ---
-def _har(returns, ppy):
-    import numpy as np
-    r=np.asarray(returns,float)
-    if r.size<5: return float(np.sqrt(np.mean(r**2)*ppy)) if r.size else 0.2
-    rv_d=float(r[-1]**2); rv_w=float(np.mean(r[-5:]**2)); rv_m=float(np.mean(r**2))
-    return max(float(np.sqrt((0.1*rv_m+0.3*rv_w+0.6*rv_d)*ppy)),1e-8)
-def _ewma(returns, lam, ppy):
-    import numpy as np
-    r=np.asarray(returns,float)
-    if r.size==0: return 0.2
-    var=float(r[0]**2)
-    for x in r[1:]: var=lam*var+(1-lam)*float(x**2)
-    return max(float(np.sqrt(var*ppy)),1e-8)
-def _ensemble(returns, ppy):
-    h=_har(returns,ppy); e=_ewma(returns,0.94,ppy)
-    sigma=0.5*h+0.5*e; eps=max(0.01+0.5*abs(h-e),0.01)
-    return sigma,eps,h,e
-def _cesf(returns, sigma, eps):
-    import numpy as np, math
-    r=np.asarray(returns,float)
-    if r.size<20: return 0.0
-    tail=float(np.mean(r < -1.5*sigma/math.sqrt(365))) if sigma>0 else 0.0
-    m=float(np.mean(r)); var=float(np.mean((r-m)**2))
-    kurt=float(np.mean((r-m)**4)/(var**2+1e-12)) if var>1e-12 else 3.0
-    kurt_n=min(max((kurt-3)/10,0),1)
-    try: ac=float(np.corrcoef((r**2)[:-1],(r**2)[1:])[0,1]); ac=max(ac,0) if np.isfinite(ac) else 0.0
-    except: ac=0.0
-    return float(np.clip(0.45*min(tail/0.08,1)+0.25*kurt_n+0.2*ac+0.1*min(eps/0.05,1),0,1))
-
-# --- Derive venue helpers (instrument naming) ---
-def _derive_perp_instrument(ccy: str) -> str:
-    """Derive perp instrument name: ETH-PERP (https://api.lyra.finance)."""
-    return f"{ccy}-PERP"
-
-def _derive_option_instrument(ccy: str, expiry_yyyymmdd: str, strike: int, kind: str) -> str:
-    """Derive option instrument: ETH-20250912-2500-P (kind C/P)."""
-    return f"{ccy}-{expiry_yyyymmdd}-{strike}-{kind}"
-
-def _collateral_choice_hint(collateral_cfg: str = "multi") -> str:
-    """Return a truthful, non-authoritative log hint."""
-    if str(collateral_cfg).upper() == "USDC":
-        return "USDC (adapter-reported account state)"
-    return "configured collateral requires adapter verification"
 
 class DeriveCesfLongVolConfig(DirectionalTradingControllerConfigBase):
     controller_name: str = "derive_cesf_long_vol"
-    controller_type: str = "directional_trading"
-    candles_connector: str = Field(default=None)
-    candles_trading_pair: str = Field(default=None)
-    candles_config: list = Field(default_factory=list)
-    interval: str = Field(default="1h")
-    vol_lookback: int = Field(default=100)
-    iv_threshold_vol: float = Field(default=2.5)
-    cesf_epsilon: float = Field(default=0.088)
-    cesf_barrier: float = Field(default=0.80)
-    executor_refresh_time: int = Field(default=20)
-    cesf_min_score: float = Field(default=0.35)
-    svi_skew_threshold: float = Field(default=2.0, json_schema_extra={"prompt":"OTM trigger: put25Δ IV - call25Δ IV > this (vol pts): "})
-    kelly_cap: float = Field(default=0.08)
-    max_fraction: float = Field(default=0.05)
-    regime: str = Field(default="auto", json_schema_extra={"prompt":"Regime auto|atm|otm|trend: "})
-    leverage: int = Field(default=3)
-    position_mode: str = Field(default="HEDGE")
-    stop_loss: float = Field(default=0.48)
-    take_profit: float = Field(default=1.2)
-    time_limit: int = Field(default=86400)
-    # ── Adapter capability gates ─────────────────────────────
-    collateral_asset: str = Field(default="USDC", json_schema_extra={"prompt":"Collateral reported by the adapter: "})
-    portfolio_margin: bool = Field(default=False, json_schema_extra={"prompt":"Use adapter-verified portfolio margin? "})
-    options_enabled: bool = Field(default=False, json_schema_extra={"prompt":"Use adapter-verified option instruments? "})
-    spot_hedge_enabled: bool = Field(default=False, json_schema_extra={"prompt":"Use adapter-verified spot hedge? "})
-    condor_active: bool = Field(default=False, json_schema_extra={"prompt":"Condor ACTIVE mode (+80% volume, strangle/reversion)? "})
+    connector_name: str = "derive_perpetual"
+    candles_connector: str = "binance_perpetual"
+    candles_trading_pair: str = "ETH-USDT"
+    interval: str = "5m"
+    signal_source: str = "binance_proxy"
+    vol_lookback: int = Field(default=100, ge=30, le=1000)
+    leverage: int = Field(default=2, ge=1, le=3)
+    position_mode: PositionMode = PositionMode.ONEWAY
+    max_executors_per_side: int = 1
+    cooldown_time: int = Field(default=300, ge=60)
+    strategy_profile: str = "baseline"
+    risk_state_id: str = "flyby-competition"
+    risk_policy: str = POLICY
+    total_amount_quote: Decimal = Field(default=Decimal("800"), gt=0)
+    risk_fraction: float = Field(default=0.005, gt=0, le=0.02)
+    max_notional_fraction: float = Field(default=0.20, gt=0, le=0.30)
+    max_slippage: float = Field(default=0.0015, gt=0, le=0.01)
+    estimated_fee_per_side: float = Field(default=0.0006, ge=0, le=0.01)
+    max_basis: float = Field(default=0.03, gt=0, le=0.05)
+    max_book_age: int = Field(default=30, gt=0, le=60)
+    max_user_stream_age: int = Field(default=60, gt=0, le=120)
+    condor_active: bool = False
+    options_enabled: bool = False
+    options_signal_enabled: bool = True
+    option_buy_moneyness: str = "any"
+    option_buy_delta_target: float = Field(default=.50, ge=.25, le=.70)
+    option_sell_delta_target: float = Field(default=.25, ge=.10, le=.35)
+    portfolio_margin: bool = False
+    spot_hedge_enabled: bool = False
+    trailing_stop: object = None
+    stop_loss: Decimal = Decimal("0.005")
+    take_profit: Decimal = Decimal("0.01")
+    time_limit: int = 10800
 
-    @field_validator("candles_connector", mode="before")
-    @classmethod
-    def _c(cls,v,info: ValidationInfo): return info.data.get("connector_name") if v in (None,"") else v
-    @field_validator("candles_trading_pair", mode="before")
-    @classmethod
-    def _p(cls,v,info: ValidationInfo): return info.data.get("trading_pair") if v in (None,"") else v
+    @model_validator(mode="after")
+    def competition_contract(self):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", self.id):
+            raise ValueError("controller id must be a stable filename-safe identifier")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", self.risk_state_id) or self.risk_policy != POLICY:
+            raise ValueError("competition risk contract required")
+        if self.strategy_profile not in ("baseline", "competition_scalp"):
+            raise ValueError("unknown strategy profile")
+        if self.strategy_profile == "competition_scalp" and self.interval != "5m":
+            raise ValueError("competition scalp candidate supports 5m only")
+        if self.interval not in INTERVAL_SECONDS:
+            raise ValueError("interval must be 5m, 15m, 1h or 4h")
+        if self.signal_source not in ("binance_proxy", "derive_native"):
+            raise ValueError("signal_source must be binance_proxy or derive_native")
+        if self.signal_source == "derive_native" and self.interval != "5m":
+            raise ValueError("native controller slice supports 5m only; no timeframe fallback")
+        if self.connector_name != MAINNET_CONNECTOR:
+            raise ValueError("Competition Flyby requires mainnet derive_perpetual; testnet/paper connectors are not allowed")
+        if self.position_mode != PositionMode.ONEWAY:
+            raise ValueError("Derive supports ONEWAY positions")
+        if self.options_enabled or self.portfolio_margin or self.spot_hedge_enabled:
+            raise ValueError("This V2 executor supports perps only; option spread plans are shadow signals")
+        if self.option_buy_moneyness not in ("any", "ATM", "OTM", "ITM"):
+            raise ValueError("unknown option moneyness selection")
+        if self.trading_pair not in ("ETH-USDC", "BTC-USDC", "SOL-USDC", "HYPE-USDC"):
+            raise ValueError("Choose an approved Derive perpetual profile")
+        if self.candles_connector != "binance_perpetual" or self.candles_trading_pair != self.trading_pair.split("-")[0] + "-USDT":
+            raise ValueError("Use the matching approved Binance perpetual candle proxy")
+        return self
+
 
 class DeriveCesfLongVolController(DirectionalTradingControllerBase):
-    def __init__(self, config: DeriveCesfLongVolConfig, *args, **kwargs):
-        self.config=config
-        self.max_records=max(config.vol_lookback,100)
-        super().__init__(config,*args,**kwargs)
+    # A process-wide reservation prevents two profiles using the same
+    # connector from allocating before its in-flight orders are visible.
+    _reservations = {}
+    _controllers = WeakSet()
 
-    def get_candles_config(self) -> List[CandlesConfig]:
-        # Primary: Derive WS spot_feed.{CCY} / orderbook.{inst} ; fallback Binance for history
-        # Hummingbot candles: if connector_name=derive we get Derive WS; else binance_perpetual proxy
-        return [CandlesConfig(connector=self.config.candles_connector, trading_pair=self.config.candles_trading_pair, interval=self.config.interval, max_records=self.max_records)]
+    def __init__(self, config, *args, **kwargs):
+        super().__init__(config, *args, **kwargs)
+        self.max_records = max(config.vol_lookback + 30, 150)
+        self._last_book_uid = None
+        self._last_book_time = 0.0
+        self._last_entry = 0.0
+        self._controllers.add(self)
+        self._risk_path = Path("data") / f"flyby-risk-{config.risk_state_id}.json"
+        self._risk = None
+        self._risk_error = False
+        self._legacy_risk_path = Path("data") / f"flyby-risk-{config.id}.json"
+
+    def get_candles_config(self):
+        if self.config.signal_source == "derive_native":
+            return []
+        return [CandlesConfig(connector=self.config.candles_connector,
+                              trading_pair=self.config.candles_trading_pair,
+                              interval=self.config.interval, max_records=self.max_records)]
+
+    def _halt(self, reason):
+        self.processed_data = {"signal": 0, "halt": True, "reason": reason,
+                               "execution_environment": execution_environment(),
+                               "options_execution": live_options_status()}
+
+    def _mainnet_connector(self):
+        if self.config.connector_name != MAINNET_CONNECTOR:
+            raise ValueError("mainnet_connector_name_required")
+        connector = self.market_data_provider.get_connector(self.config.connector_name)
+        require_mainnet_connector(connector)
+        if getattr(connector, "FLYBY_COMPATIBILITY_VERSION", None) != COMPATIBILITY_VERSION:
+            raise ValueError("reviewed_connector_compatibility_required")
+        return connector
+
+    def _account(self, connector, now):
+        state = require_margin_state(connector, now)
+        equity = float(state["equity"])
+        available = float(state["available"])
+        positions = list(connector.account_positions.values())
+        # The venue's full subaccount valuation already includes position P&L.
+        if not np.isfinite([equity, available]).all() or equity <= 0 or available < 0:
+            raise ValueError("invalid_account")
+        if self._risk_error:
+            raise ValueError("invalid_risk_checkpoint")
+        cap = float(self.config.total_amount_quote)
+        orders = list(connector.in_flight_orders.values())
+        if self._legacy_risk_path.exists() and self._legacy_risk_path != self._risk_path:
+            raise ValueError("legacy_risk_checkpoint_requires_review")
+        peers = [c for c in self._controllers
+                 if c.market_data_provider.get_connector(c.config.connector_name) is connector]
+        if any(c.config.risk_state_id != self.config.risk_state_id
+               or c.config.total_amount_quote != self.config.total_amount_quote for c in peers):
+            raise ValueError("shared_account_risk_contract_mismatch")
+        self._risk_store = RiskCheckpoint(self._risk_path, account_binding(connector), self.config.total_amount_quote)
+        self._risk, risk = self._risk_store.observe(state["equity"], now,
+            allow_bootstrap=not orders and not state["open_orders"] and not any(p.amount for p in positions))
+        committed = sum(abs(float(p.amount) * float(p.entry_price)) for p in positions)
+        committed += sum(abs(float(o.amount) * float(o.price)) for o in orders if o.price is not None)
+        if not np.isfinite(committed):
+            raise ValueError("invalid_account_exposure")
+        active = [e for c in peers for e in c.executors_info if e.is_active]
+        known_ids = {oid for e in active for oid in e.custom_info.get("order_ids", [])}
+        known_orders = all(o.client_order_id in known_ids for o in orders)
+        # HB's ExecutorInfo exposes order IDs but not net remaining base.
+        # Match position sign and upper bound; exact fill reconciliation is
+        # still an adapter preflight requirement, not a claimed ledger bridge.
+        known_positions = all(any(
+            e.config.trading_pair == p.trading_pair
+            and (float(p.amount) > 0) == (e.config.side == TradeType.BUY)
+            and abs(float(p.amount)) <= float(e.config.amount) + 1e-9
+            for e in active) for p in positions if p.amount)
+        return {**risk, "equity": min(cap, equity), "venue_equity": state["equity"], "available": min(cap, available),
+                "committed": committed,
+                "entry_allowed": not orders and not state["open_orders"] and not any(p.amount for p in positions),
+                "margin_source": state["source"], "margin_age": now - state["observed_at"],
+                "reconciled": known_orders and known_positions}
 
     async def update_processed_data(self):
-        df=self.market_data_provider.get_candles_df(connector_name=self.config.candles_connector, trading_pair=self.config.candles_trading_pair, interval=self.config.interval, max_records=self.max_records)
-        if df is None or df.empty or len(df)<30:
-            self.processed_data["signal"]=0; return
-        closes=df["close"].astype(float).values
-        rets=np.diff(np.log(np.maximum(closes,1e-8)))
-        mins={"1m":1,"3m":3,"5m":5,"15m":15,"1h":60,"4h":240,"1d":1440}.get(self.config.interval,60)
-        ppy=365*24*60/mins
-        sigma,eps,har,ewma=_ensemble(rets[-self.config.vol_lookback:],ppy)
-        score=_cesf(rets[-self.config.vol_lookback:],sigma,eps)
-        recent=np.sqrt(np.mean(rets[-20:]**2)*ppy) if len(rets)>=20 else sigma
-        edge=sigma-recent
-        # ATR + momentum + SVI skew proxy (use close/close for trend, SVI skew from wing proxy)
-        # Live Derive would replace this with src/venue/derive.py SVI: POST /public/get_ticker → w=iv²τ → fit_svi_slice
         try:
-            df.ta.atr(length=14,append=True); atr=float(df["ATRr_14"].iloc[-1]) if "ATRr_14" in df.columns else 0.0
-        except: atr=0.0
-        atr_ok= atr>float(np.mean(closes[-20:])*0.002) if len(df)>=20 else True
-        mom=float(np.sum(rets[-24:])) if len(rets)>=24 else 0.0  # 24*1h = 24h mom
-        # SVI skew proxy: put wing RV vs call wing (simplified: downside tail vs upside)
-        # Derive live: skew = IV_25Δ_put - IV_25Δ_call from SVI surface (see src/svi/fit.py)
-        downside=np.mean(rets[-20:]< -recent/np.sqrt(ppy)*1.0) if recent>0 else 0
-        upside=np.mean(rets[-20:]> recent/np.sqrt(ppy)*1.0) if recent>0 else 0
-        skew=(downside-upside)*30  # scale to vol pts ~ -3..+3; live Derive SVI gives put-call 2-4 vol pts on ETH
-        # Kelly
-        var=max(eps,0.02)**2; raw=edge/var*0.02; f_half=min(max(raw*0.5,0),self.config.kelly_cap,self.config.max_fraction)
-        conf=min(max(score/0.35,0.5),1.5)
-        # ── Regime selection (Condor agent would decide here; we replicate rule for determinism)
-        # Condor lane: agents/condor_agent.py decide(snapshot, active=condor_active) picks regime + thresh in BANDS,
-        # then controller executes. OTM regimes → Derive OPTIONS (Black76) when options_enabled.
-        # ACTIVE mode: thresh 1.2 vs 1.5, mom 0.8% vs 1.2%, adds strangle + reversion for volume.
-        active = bool(self.config.condor_active)
-        otm_cesf = 0.33 if active else 0.40
-        otm_skew = 1.2 if active else self.config.svi_skew_threshold
-        otm_edge = 0.010 if active else 0.015
-        mom_thr = 0.008 if active else 0.012
-        cesf_min = (0.27 if active else self.config.cesf_min_score)
-        thresh = (1.5 if active else self.config.iv_threshold_vol)
-        signal=0; regime="flat"; venue="flat"
-        if self.config.regime=="auto":
-            # NEW ACTIVE: strangle when vol expansion (both wings cheap, eps high)
-            if active and score < 0.28 and edge > 0.016 and eps > 0.04 and abs(skew) < 1.0 and atr_ok:
-                signal=1; regime="strangle-long-otm"; venue="derive-options"
-            elif score>=otm_cesf and skew>otm_skew and edge>otm_edge:
-                signal=-1; regime="otm-put-25d"; venue="derive-options" if self.config.options_enabled else "derive-perp(synthetic)"
-            elif score>=cesf_min and edge>thresh/100 and atr_ok:
-                signal=-1; regime="atm-put"; venue="derive-perp"  # ATM: perp synthetic or ATM option
-            elif active and score < 0.32 and edge > 0.010 and eps > 0.035 and atr_ok:
-                signal=1; regime="otm-call-25d"; venue="derive-options" if self.config.options_enabled else "derive-perp"  # reversion scalp
-            elif mom>mom_thr and score< (0.35 if active else 0.30) and atr_ok:
-                signal=1; regime="trend-call"; venue="derive-perp"
-            elif mom< -mom_thr and score< (0.35 if active else 0.30) and atr_ok:
-                signal=-1; regime="trend-put"; venue="derive-perp"
-            elif score<0.25 and edge>(self.config.iv_threshold_vol+0.4)/100 and atr_ok:
-                signal=1; regime="otm-call-25d"; venue="derive-options" if self.config.options_enabled else "derive-perp"
-        else:
-            if self.config.regime=="atm" and score>=self.config.cesf_min_score and edge>self.config.iv_threshold_vol/100: signal=-1; regime="atm-put"; venue="derive-perp"
-            elif self.config.regime=="otm" and skew>2.0 and edge>0.015:
-                signal=-1; regime="otm-put-25d"; venue="derive-options" if self.config.options_enabled else "derive-perp"
+            now = self.market_data_provider.time()
+            try:
+                connector = self._mainnet_connector()
+            except (ValueError, KeyError, AttributeError) as exc:
+                return self._halt("reviewed_connector_compatibility_required"
+                    if str(exc) == "reviewed_connector_compatibility_required" else "mainnet_connector_required")
+            if not connector.ready:
+                return self._halt("connector_not_ready")
+            user_age = now - connector._user_stream_tracker.last_recv_time
+            if not 0 <= user_age <= self.config.max_user_stream_age:
+                return self._halt("stale_user_stream")
+            book = connector.get_order_book(self.config.trading_pair)
+            uid = book.last_diff_uid
+            if self._last_book_uid is not None and uid != self._last_book_uid:
+                self._last_book_time = now
+            self._last_book_uid = uid
+            if now - self._last_book_time > self.config.max_book_age:
+                return self._halt("stale_order_book")
+            if self.config.signal_source == "derive_native":
+                ccy = self.config.trading_pair.split("-")[0]
+                native = load_market(Path("data") / f"flyby-market-{ccy}.json", now, ccy)
+                if (native["interval"] != "5m" or not native["features"].get("valid")
+                        or not 0 <= now - native["perp"]["timestamp"] <= 5):
+                    return self._halt("invalid_native_context")
+                import pandas as pd
+                frame = pd.DataFrame(native["candles"])
+            else:
+                frame = self.market_data_provider.get_candles_df(
+                    connector_name=self.config.candles_connector, trading_pair=self.config.candles_trading_pair,
+                    interval=self.config.interval, max_records=self.max_records)
+            seconds = INTERVAL_SECONDS[self.config.interval]
+            if frame is None or "timestamp" not in frame or len(frame) < self.config.vol_lookback + 2:
+                return self._halt("missing_candles")
+            completed = frame.loc[frame.timestamp.astype(float) + seconds <= now].copy()
+            if len(completed) < self.config.vol_lookback + 1:
+                return self._halt("candle_warmup")
+            times = completed.timestamp.astype(float).to_numpy()
+            if not np.allclose(np.diff(times[-self.config.vol_lookback - 1:]), seconds):
+                return self._halt("candle_gap")
+            age = now - (float(times[-1]) + seconds)
+            if not 0 <= age <= seconds + 60:
+                return self._halt("stale_candles")
+            bids, asks = book.snapshot
+            if bids.empty or asks.empty:
+                return self._halt("empty_order_book")
+            best_bid, best_ask = float(bids.price.iloc[0]), float(asks.price.iloc[0])
+            if not 0 < best_bid < best_ask:
+                return self._halt("crossed_order_book")
+            mid = (best_bid + best_ask) / 2
+            if abs(float(completed.close.iloc[-1]) / mid - 1) > self.config.max_basis:
+                return self._halt("proxy_basis")
+            account = self._account(connector, now)
+            horizon = 1800 if self.config.strategy_profile == "competition_scalp" else 14400
+            features = feature_frame(completed, self.config.interval, self.config.vol_lookback,
+                                     trend_horizon_seconds=horizon).iloc[-1].to_dict()
+            features.update(account, stale_secs=max(0, age - seconds), ccy=self.config.trading_pair.split("-")[0])
+            features["valid"] = bool(features["valid"])
+            decision = decide(features, active=self.config.condor_active)
+            self.processed_data = {**features, "signal": decision.signal, "halt": decision.halt,
+                                   "decision": asdict(decision), "regime": decision.regime,
+                                   "reason": decision.reason, "confidence": decision.confidence,
+                                   "entry_mid": mid, "bids": bids, "asks": asks, "updated_at": now,
+                                   "signal_time": float(times[-1]),
+                                   "signal_source": self.config.signal_source,
+                                   "execution_environment": execution_environment(),
+                                   "options_execution": live_options_status()}
+            self._update_options_shadow(now)
+        except (ValueError, KeyError, TypeError, AttributeError, IndexError, OSError) as exc:
+            self._halt(str(exc) if isinstance(exc, ValueError) else f"adapter_error:{type(exc).__name__}")
 
-        # Record capability state for the adapter boundary; do not infer it
-        # from research models or from the presence of a config key.
-        collateral_hint = _collateral_choice_hint(self.config.collateral_asset)
-        pm_hint = "adapter-verified portfolio margin" if self.config.portfolio_margin else "adapter-reported margin"
-        # Options execution hint: derive instrument name for 7d 25Δ put
-        ccy = self.config.trading_pair.split("-")[0].split("/")[0] if "-" in self.config.trading_pair or "/" in self.config.trading_pair else "ETH"
-        opt_hint = _derive_option_instrument(ccy, "7d(nearest)", int(closes[-1]*0.97), "P") if "otm" in regime else "ATM"
+    def create_actions_proposal(self):
+        data = self.processed_data
+        now = self.market_data_provider.time()
+        if not data.get("signal") or data.get("halt") or self.config.manual_kill_switch:
+            return []
+        if any(e.is_active for e in self.executors_info) or now - self._last_entry < self.config.cooldown_time:
+            return []
+        try:
+            signal_time = float(data["signal_time"])
+        except (ValueError, KeyError, TypeError):
+            self._halt("incomplete_or_stale_signal")
+            return []
+        if (not np.isfinite(signal_time)
+                or not 0 <= now - (signal_time + INTERVAL_SECONDS[self.config.interval]) <= INTERVAL_SECONDS[self.config.interval] + 60):
+            self._halt("incomplete_or_stale_signal")
+            return []
+        try:
+            connector = self._mainnet_connector()
+        except (ValueError, KeyError, AttributeError):
+            self._halt("mainnet_connector_required")
+            return []
+        key = id(connector)
+        if self._reservations.get(key, 0) > now:
+            return []
+        try:
+            account = self._account(connector, now)
+        except (ValueError, KeyError, TypeError, AttributeError, OSError):
+            self._halt("account_recheck_failed")
+            return []
+        if (not account["entry_allowed"] or not account["reconciled"] or not connector.ready
+                or now - data.get("updated_at", 0) > 5
+                or not 0 <= now - connector._user_stream_tracker.last_recv_time <= self.config.max_user_stream_age
+                or now - self._last_book_time > self.config.max_book_age
+                or account["risk_mode"] == "hard_stop"):
+            return []
+        # A loss between the signal tick and proposal cannot reuse the easier gate.
+        current = decide({**data, **account}, active=self.config.condor_active)
+        if current.halt or not current.signal or current.signal != data["signal"]:
+            data["entry_block"] = current.reason
+            return []
+        data.update(account, confidence=current.confidence)
+        exit_builder = scalp_exits if self.config.strategy_profile == "competition_scalp" else dynamic_exits
+        stop, profit, hold = exit_builder(data["atr_pct"], data["confidence"], INTERVAL_SECONDS[self.config.interval])
+        notional = risk_size(equity=account["equity"], available=account["available"],
+                             committed=account["committed"], confidence=data["confidence"],
+                             stop_pct=stop + 2 * (self.config.estimated_fee_per_side + self.config.max_slippage) + .0001,
+                             gross_cap=account["equity"] * 0.30, risk_fraction=self.config.risk_fraction,
+                             notional_fraction=self.config.max_notional_fraction, peak_dd=account["peak_dd"],
+                             drawdown_limit=.15, size_scale=account["risk_scale"],
+                             trade_risk_budget=account["risk_trade_budget"])
+        if notional <= 0:
+            return []
+        price = data["entry_mid"]
+        side = TradeType.BUY if data["signal"] > 0 else TradeType.SELL
+        rule = connector.trading_rules.get(self.config.trading_pair)
+        if rule is None:
+            data["entry_block"] = "missing_venue_rules"
+            return []
+        def sized(at_price, budget=notional):
+            return venue_size(budget=budget, price=at_price, side=1 if side == TradeType.BUY else -1,
+                              min_amount=rule.min_order_size, amount_step=rule.min_base_amount_increment,
+                              price_tick=rule.min_price_increment, min_notional=rule.min_notional_size,
+                              max_amount=rule.max_order_size)
+        try:
+            initial = sized(price)
+        except (ValueError, AttributeError):
+            data["entry_block"] = "invalid_venue_rules"
+            return []
+        data["venue_minimum_notional"] = float(initial.minimum_notional)
+        data["venue_minimum_equity_fraction"] = float(initial.minimum_notional) / account["equity"]
+        if initial.amount <= 0:
+            data["entry_block"] = initial.reason
+            return []
+        amount = initial.amount
+        # Re-read depth immediately before proposing an executor.
+        book = connector.get_order_book(self.config.trading_pair)
+        bids, asks = book.snapshot
+        if bids.empty or asks.empty or not 0 < float(bids.price.iloc[0]) < float(asks.price.iloc[0]):
+            return []
+        levels = asks if side == TradeType.BUY else bids
+        quote = depth_quote(zip(levels.price, levels.amount), float(amount))
+        if quote is None or abs(quote.worst_price / price - 1) > self.config.max_slippage:
+            return []
+        # The executable limit, not a cheaper mid, must respect the quote cap.
+        try:
+            executable = sized(quote.worst_price)
+        except ValueError:
+            data["entry_block"] = "invalid_venue_rules"
+            return []
+        if executable.amount <= 0:
+            data["entry_block"] = executable.reason
+            return []
+        amount = min(amount, executable.amount)
+        quote = depth_quote(zip(levels.price, levels.amount), float(amount))
+        limit = executable.price
+        if (quote is None or amount * max(Decimal(str(price)), limit) > Decimal(str(notional))
+                or abs(float(limit) / price - 1) > self.config.max_slippage):
+            return []
+        instrument = next((r for r in getattr(connector, "_instrument_ticker", [])
+                           if r.get("instrument_name") == self.config.trading_pair.split("-")[0] + "-PERP"), None)
+        if not instrument:
+            data["entry_block"] = "missing_public_fee_rules"
+            return []
+        try:
+            rates = [self.config.estimated_fee_per_side, float(instrument["taker_fee_rate"]),
+                     float(instrument["maker_fee_rate"])]
+            fee_rate = max(rates)
+            base_fee = float(instrument["base_fee"])
+            if not np.isfinite([*rates, base_fee]).all() or min(*rates, base_fee) < 0:
+                raise ValueError("invalid fees")
+        except (KeyError, ValueError, TypeError):
+            data["entry_block"] = "invalid_public_fee_rules"
+            return []
+        executable_notional = float(amount * max(Decimal(str(price)), limit))
+        # Include an exit reserve, not just the cheap visible entry spread.
+        costs = 2 * fee_rate + abs(quote.worst_price / price - 1) + self.config.max_slippage + 2 * base_fee / executable_notional + .0001
+        if not cost_allows_entry(profit, costs, account["cost_multiple"]):
+            data["entry_block"] = "cost_gate"
+            return []
+        if amount < rule.min_order_size or amount * limit < rule.min_notional_size:
+            return []
+        if executable_notional * (stop + costs) > account["risk_trade_budget"] * data["confidence"]:
+            data["entry_block"] = "trade_risk_budget"
+            return []
+        data.update(stop_loss=stop, take_profit=profit, time_limit=hold)
+        executor = self.get_executor_config(side, limit, amount)
+        try:
+            consumed = self._risk_store.consume_entry(account["venue_equity"], now, self.config.trading_pair,
+                                                     data["signal_time"], self.config.cooldown_time)
+        except (OSError, ValueError, KeyError, TypeError):
+            self._halt("risk_entry_checkpoint_failed")
+            return []
+        if not consumed:
+            data["entry_block"] = "signal_already_consumed_or_cooldown"
+            return []
+        self._reservations[key] = now + 30
+        self._last_entry = now
+        return [CreateExecutorAction(controller_id=self.config.id, executor_config=executor)]
 
-        self.processed_data.update(dict(
-            signal=signal, regime=regime,
-            venue=venue, execution_venue=venue,
-            options_enabled=self.config.options_enabled,
-            derive_option_hint=opt_hint if self.config.options_enabled and "otm" in regime else None,
-            forecast_sigma=float(sigma), forecast_epsilon=float(eps), har=float(har), ewma=float(ewma),
-            cesf_score=float(score), edge=float(edge), iv_proxy=float(recent),
-            atr=float(atr), momentum=float(mom), skew=float(skew),
-            kelly_frac=float(f_half*conf),
-            collateral=collateral_hint, collateral_asset=self.config.collateral_asset,
-            portfolio_margin=self.config.portfolio_margin, pm_model=pm_hint,
-            spot_hedge=self.config.spot_hedge_enabled,
-            fees="adapter-reported fees + estimated spread/slippage",
-            derive_perp=_derive_perp_instrument(ccy),
-            capabilities="options/multi-collateral/portfolio-margin are capability-gated",
-        ))
-
-    def get_executor_config(self, trade_type: TradeType, price: Decimal, amount: Decimal):
-        # OTM longer hold, ATM shorter; routing logged in processed_data
-        regime=self.processed_data.get("regime","atm-put")
-        venue=self.processed_data.get("venue","derive-perp")
-        tp=1.8 if "otm" in regime else self.config.take_profit
-        sl=0.55 if "otm" in regime else self.config.stop_loss
-        tl=172800 if "otm" in regime else self.config.time_limit
-        # PositionExecutorConfig is used only for the verified live instrument
-        # path. Options require a separate adapter/executor contract and are
-        # therefore not represented by this default perp executor.
+    def get_executor_config(self, trade_type, price: Decimal, amount: Decimal):
+        self._mainnet_connector()
+        data = self.processed_data
         return PositionExecutorConfig(
-            timestamp=self.market_data_provider.time(),
-            connector_name=self.config.connector_name,  # must be "derive" for scoring
-            trading_pair=self.config.trading_pair,       # e.g. ETH-PERP (or ETH-USDC spot for rebalance)
-            side=trade_type, entry_price=price, amount=amount,
-            leverage=self.config.leverage, position_mode=self.config.position_mode,
-            stop_loss=sl, take_profit=tp, time_limit=tl,
-            trailing_stop=None, coerce_tp_to_limit=False,
+            controller_id=self.config.id, timestamp=self.market_data_provider.time(),
+            connector_name=self.config.connector_name, trading_pair=self.config.trading_pair,
+            side=trade_type, entry_price=price, amount=amount, leverage=self.config.leverage,
+            triple_barrier_config=TripleBarrierConfig(
+                stop_loss=Decimal(str(data.get("stop_loss", self.config.stop_loss))),
+                take_profit=Decimal(str(data.get("take_profit", self.config.take_profit))),
+                time_limit=int(data.get("time_limit", self.config.time_limit)),
+                open_order_type=OrderType.LIMIT, stop_loss_order_type=OrderType.MARKET,
+                take_profit_order_type=OrderType.MARKET, time_limit_order_type=OrderType.MARKET),
         )
+
+    def stop_actions_proposal(self):
+        try:
+            connector = self._mainnet_connector()
+        except (ValueError, KeyError, AttributeError):
+            self._halt("mainnet_connector_required")
+            return []
+        if any(e.is_active for e in self.executors_info):
+            try:
+                risk = self._account(connector, self.market_data_provider.time())
+                if risk["risk_mode"] == "hard_stop":
+                    self._halt("competition_hard_stop")
+            except (ValueError, KeyError, TypeError, AttributeError, OSError):
+                # Never require a healthy entry checkpoint to propose protective exits.
+                self._halt("risk_or_account_unavailable")
+        if self.processed_data.get("halt") or self.config.manual_kill_switch:
+            return [StopExecutorAction(controller_id=self.config.id, executor_id=e.id)
+                    for e in self.executors_info if e.is_active]
+        direction = self.processed_data.get("signal", 0)
+        candidate_exit = None
+        if self.config.strategy_profile == "competition_scalp":
+            decision = decide(self.processed_data, active=self.config.condor_active)
+            candidate_exit = lambda e: exit_signal_reason("competition_scalp", decision, self.processed_data,
+                                               1 if e.config.side == TradeType.BUY else -1)
+        return [StopExecutorAction(controller_id=self.config.id, executor_id=e.id)
+                for e in self.executors_info if e.is_active and (
+                    (not e.is_trading and self.market_data_provider.time() - e.timestamp >= 30)
+                    or (e.is_trading and (bool(candidate_exit(e)) if candidate_exit else (not direction or
+                        ((direction > 0) != (e.config.side == TradeType.BUY))))))]
+
+    def _update_options_shadow(self, now):
+        """Consume only validated fresh public context; failure is advisory only."""
+        self.processed_data["spread_plan"] = None
+        self.processed_data["options_delta"] = {"status": "unavailable_public_chain", "live_options": False}
+        if not self.config.options_signal_enabled:
+            return
+        try:
+            ccy = self.config.trading_pair.split("-")[0]
+            if ccy not in ("ETH", "BTC"):
+                return
+            market = load_market(Path("data") / f"flyby-market-{ccy}.json", now, ccy)
+            if not 0 <= now - market["perp"]["timestamp"] <= 5:
+                return
+            spot = float(market["perp"]["index"])
+            quotes, metadata, ivs = [], {}, []
+            for raw in market["options"]:
+                if not raw["quoted"] or raw.get("delta") is None or not 0 <= now - raw["timestamp"] <= 5:
+                    continue
+                q, fee = normalize_quote(raw)
+                quotes.append(q)
+                metadata[q.instrument] = asdict(fee)
+            for kind in ("call", "put"):
+                qualified = [q for q in market["options"] if q["instrument"] in metadata and q["kind"] == kind
+                             and q["pricing"].get("iv") is not None]
+                if qualified:
+                    ivs.append(min(qualified, key=lambda q: (abs(q["strike"] / spot - 1), q["expiry"]))["pricing"]["iv"])
+            forecast = self.processed_data.get("forecast_sigma")
+            if not ivs or forecast is None:
+                return
+            # Uncalibrated IV edge remains a shadow diagnostic, not established alpha.
+            self.plan_options(quotes, now, float(forecast) - sum(ivs) / len(ivs),
+                              fee_metadata=metadata, option_spot=spot)
+        except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError, OSError):
+            self.processed_data["spread_plan"] = None
+            self.processed_data["options_delta"] = {"status": "invalid_public_chain", "live_options": False}
+
+    def plan_options(self, chain, now, option_iv_edge, *, fee_metadata=None, option_spot=None):
+        # A previous plan must never survive a failed account/signal recheck.
+        self.processed_data["spread_plan"] = None
+        self.processed_data["options_delta"] = {"status": "no_plan", "live_options": False}
+        if not self.config.options_signal_enabled:
+            return None
+        try:
+            connector = self._mainnet_connector()
+            account = self._account(connector, now)
+            if (not account["entry_allowed"] or not account["reconciled"] or not connector.ready
+                    or not 0 <= now - self.processed_data.get("updated_at", 0) <= 5
+                    or not 0 <= now - connector._user_stream_tracker.last_recv_time <= self.config.max_user_stream_age
+                    or now - self._last_book_time > self.config.max_book_age):
+                return None
+            snapshot = {**self.processed_data, **account, "option_iv_edge": option_iv_edge}
+            decision = decide(snapshot, active=self.config.condor_active)
+            if decision.option_direction is None or decision.halt:
+                return None
+            spot = float(snapshot["entry_mid"] if option_spot is None else option_spot)
+            if not np.isfinite(spot) or spot <= 0 or abs(spot / float(snapshot["entry_mid"]) - 1) > self.config.max_basis:
+                return None
+            budget = min(snapshot["available"], snapshot["equity"] * .01, snapshot["risk_trade_budget"])
+            policy = account_policy(spot, max(.01, snapshot["equity"] - budget), scale=snapshot["risk_scale"],
+                                    underlying=self.config.trading_pair.split("-")[0],
+                                    net_fraction=min(.20, self.config.max_notional_fraction),
+                                    committed_gross_quote=snapshot["committed"],
+                                    buy_moneyness=self.config.option_buy_moneyness,
+                                    buy_target=self.config.option_buy_delta_target,
+                                    sell_target=self.config.option_sell_delta_target)
+            plan = build_spread(chain, kind=decision.option_direction,
+                                underlying=self.config.trading_pair.split("-")[0], now=now,
+                                debit_budget=budget,
+                                confidence=decision.confidence, delta_policy=policy,
+                                fee_fraction=0 if fee_metadata is not None else .001)
+            if plan and fee_metadata is not None:
+                by_name = {q.instrument: q for q in chain}
+                buy = {**asdict(by_name[plan.buy]), "fees": fee_metadata[plan.buy]}
+                sell = {**asdict(by_name[plan.sell]), "fees": fee_metadata[plan.sell]}
+                plan = costed_plan(buy, sell, now, spot, budget, decision.confidence, policy)
+        except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError, OSError):
+            self.processed_data["options_delta"]["status"] = "invalid_account_or_delta"
+            return None
+        self.processed_data["spread_plan"] = plan.to_dict() if plan else None
+        self.processed_data["options_delta"] = delta_context(self.processed_data["spread_plan"], now)
+        return plan
+
+    def get_custom_info(self):
+        """Existing MQTT/API reporting only; native context cannot place orders."""
+        path = context_path(self.config.id)
+        try:
+            context = controller_context(self, self.market_data_provider.time())
+            summary = context_summary(context, path)
+            try:
+                atomic_owned_json(path, context, "flyby_controller_context")
+            except (OSError, ValueError, TypeError):
+                summary["context_file_status"] = "unavailable"
+            return {"flyby": summary}
+        except Exception:
+            # Advisory reporting must never interrupt execution or protective stops.
+            return {"flyby": {"network": "mainnet", "context_status": "unavailable", "live_options": False}}

@@ -1,44 +1,23 @@
-# Submission Update Checklist
+# Submission update checklist
 
-Use this when updating the Botcamp submission from the last committed baseline.
+- [x] One canonical controller; historical name is an import alias.
+- [x] Correct perp connector, one-way mode and actual triple-barrier fields.
+- [x] Mainnet-only config/runtime domain gates, installer endpoint preflight,
+  and consistent portable Condor/team setup instructions.
+- [x] Shared policy, closed-bar features, depth/account/cost gates.
+- [x] ETH/BTC primary candidates; SOL/HYPE opt-in fallback profiles.
+- [x] Matched call/put shadow plans; live options fail closed.
+- [x] Preserve old testnet runner/traces locally, outside public navigation.
+- [x] Test pinned Hummingbot v2.17.0 and run traced stress campaigns.
+- [x] Replace stale profit/options/portfolio-margin claims with measured evidence.
+- [x] Correct BASE-USDC mapping, report minimum-cap incompatibility, and ship
+  explicit pinned close/account compatibility with recoverable originals.
+- [x] Include identical paused Condor samples and curated archive/hash tooling.
+- [x] Include explicit `AGENT.md` / `loops/flyby_operator/loop.md`, fixed profile,
+  no-overwrite installer and real registry/mocked-tick verification.
+- [ ] Pass [live readiness gates](COMPETITION_READINESS.md).
+- [ ] Operator chooses account universe and deliberately enables the sample.
+- [x] Review curated source and run bounded secret/hash checks plus local validation.
+- [ ] Record organizer confirmation of the exact submitted GitHub commit.
 
-## Reviewer-facing Update
-
-Flyby now has a clearer Derive-native volatility pitch and a live v3 testnet proof lane. The update keeps the Hummingbot V2 mainnet controller path intact while adding a Derive v3 testnet runner that authenticates, scans the native perp universe, makes Condor decisions, places real testnet orders, reports positions/orders/notional exposure, and survives venue-level risk-universe rejections without crashing.
-
-The testnet perp book can be thin, so the v3 run should be framed as integration and safety proof. Production liquidity remains the Hummingbot V2 mainnet route.
-
-## Files to Include
-
-```bash
-git add README.md strategy.md SUBMISSION_POSITIONING.md FLYBY_V3_TESTNET.md .env.example .gitignore
-git add run_flyby_v3_testnet.py scripts/start_flyby_v3_testnet.sh scripts/flyby_v3_status.sh
-git add src/venue/derive.py hb_backtest/testnet_proof.md hb_backtest/flyby_v3_testnet.jsonl
-```
-
-## Files to Avoid
-
-Do not add local secrets or scratch scaffolds:
-
-```text
-.env
-/tmp/flyby-v3-testnet.env
-testnet_scaffold/.env.testnet
-testnet_scaffold/
-place_one_trade.py
-place_v3_order.py
-```
-
-Most temporary `hb_backtest/*.json` files are research artifacts. Add only the proof files unless we intentionally want the full research dump in the submission.
-
-## Pre-submit Checks
-
-```bash
-python3 -m py_compile run_flyby_v3_testnet.py run_hb_v3_live.py
-ENV_FILE=/tmp/flyby-v3-testnet.env bash scripts/flyby_v3_status.sh
-git status --short
-```
-
-## Short Update Text
-
-Flyby is now packaged as a Derive-native volatility agent: SVI + Black76 + CESF crash-mass + Kelly/PortfolioGuard, controlled by Condor and executable through Hummingbot. The new v3 testnet lane proves Derive authentication, market scanning, live order creation, status reporting, and no-crash handling for unsupported/risk-universe instruments. The V2 mainnet adapter remains the production Hummingbot route.
+Do not submit runtime state, `stress_artifacts/`, `data/` or `.local_harness/`.

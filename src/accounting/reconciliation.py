@@ -8,7 +8,10 @@ from typing import Any, Dict, Mapping, Set
 
 
 def _d(value: Any) -> Decimal:
-    return Decimal(str(value or 0))
+    result = Decimal(str(value))
+    if not result.is_finite():
+        raise ValueError("non-finite reconciliation value")
+    return result
 
 
 @dataclass(frozen=True)
@@ -36,11 +39,16 @@ def reconcile(
     safe-halt on ``ok == False`` before creating another executor.
     """
 
+    required = {"equity", "realized_pnl", "open_order_ids", "positions"}
+    if not required.issubset(local) or not required.issubset(venue):
+        return ReconciliationResult(ok=False, reasons=("missing_snapshot_fields",))
     equity_delta = _d(local.get("equity")) - _d(venue.get("equity"))
     pnl_delta = _d(local.get("realized_pnl")) - _d(venue.get("realized_pnl"))
     equity_limit = _d(equity_tolerance)
     pnl_limit = _d(pnl_tolerance)
     position_limit = _d(position_tolerance)
+    if min(equity_limit, pnl_limit, position_limit) < 0:
+        raise ValueError("negative reconciliation tolerance")
 
     local_orders: Set[str] = {str(x) for x in local.get("open_order_ids", ())}
     venue_orders: Set[str] = {str(x) for x in venue.get("open_order_ids", ())}
@@ -51,9 +59,9 @@ def reconcile(
     venue_positions = venue.get("positions", {}) or {}
     instruments = set(local_positions) | set(venue_positions)
     position_deltas = {
-        instrument: _d(local_positions.get(instrument)) - _d(venue_positions.get(instrument))
+        instrument: _d(local_positions.get(instrument, 0)) - _d(venue_positions.get(instrument, 0))
         for instrument in instruments
-        if abs(_d(local_positions.get(instrument)) - _d(venue_positions.get(instrument))) > position_limit
+        if abs(_d(local_positions.get(instrument, 0)) - _d(venue_positions.get(instrument, 0))) > position_limit
     }
 
     reasons = []
