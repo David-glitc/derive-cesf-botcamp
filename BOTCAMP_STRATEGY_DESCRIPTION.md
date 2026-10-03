@@ -1,0 +1,11 @@
+Flyby is a risk-gated directional trading strategy on Derive, implemented as a Hummingbot V2 controller with a Condor operator-agent package. Its executable trading component handles perpetuals; its separate options component produces advisory debit-spread plans without placing live option orders.
+
+The baseline uses completed five-minute candles, normalized price momentum, directional efficiency, volume and ATR-based volatility. Entry requires consecutive-bar confirmation. Default candles come from the matching Binance perpetual market, while Derive provides execution-book and account context. Before entering, the controller checks data freshness, account reconciliation, available margin, existing exposure, venue minimums, executable depth and transaction costs.
+
+Perpetual entries use depth-aware marketable-limit orders. Position management combines volatility-adjusted stop-loss, take-profit and time-limit rules with signal and risk-state exits. The operator selects the market: ETH/BTC are primary candidates, with SOL/HYPE as optional fallbacks. Markets whose minimum orders exceed the approved sizing caps are skipped.
+
+The options research component constructs bullish call debit spreads or bearish put debit spreads using same-expiry contracts. It considers fresh quotes, fees, liquidity and signed delta exposure, targeting approximately 0.50 absolute delta on the bought leg and 0.25 on the sold leg. Eligible expiries range from two to five days, preferably three. Paper exit rules target +30% profit, −18% loss and a maximum six-hour hold, with additional signal and expiry checks. These are not live protective orders or verified options returns.
+
+The competition profile uses an $800 budget, a maximum normal entry notional of $160 and a gross exposure cap of $240. It permits one position at a time. Drawdown from persisted peak equity triggers restricted trading at −10% and a hard stop at −15%. Risk state survives restarts; software limits cannot guarantee realized losses remain within those thresholds.
+
+Configurations ship paused. Live activation requires mainnet account reconciliation and operator verification. Offline tests establish tested behavior, not profitability or uninterrupted competition runtime.
