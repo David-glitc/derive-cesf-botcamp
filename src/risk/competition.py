@@ -9,7 +9,9 @@ import os
 from pathlib import Path
 import tempfile
 
-POLICY = "flyby-dd10-dd15-v1"
+POLICY = "flyby-dd15-dd25-v1"
+RESTRICTED_DRAWDOWN = Decimal("0.15")
+HARD_STOP_DRAWDOWN = Decimal("0.25")
 PAIRS = {"ETH-USDC", "BTC-USDC", "SOL-USDC", "HYPE-USDC"}
 
 
@@ -83,8 +85,8 @@ def advance(state, equity, now):
         result.update(day=int(now // 86400), day_equity=str(max(equity, Decimal("0.01"))))
     peak = max(money(state["peak"]), equity)
     result.update(peak=str(peak), last_observed=now)
-    result["restricted"] |= equity <= peak * Decimal("0.90")
-    result["hard_stop"] |= equity <= peak * Decimal("0.85")
+    result["restricted"] |= equity <= peak * (1 - RESTRICTED_DRAWDOWN)
+    result["hard_stop"] |= equity <= peak * (1 - HARD_STOP_DRAWDOWN)
     return result
 
 
@@ -92,12 +94,13 @@ def risk_view(state, equity):
     validate_state(state, state["budget"], state["account_binding"])
     equity, peak, budget = money(equity), money(state["peak"]), money(state["budget"])
     dd = (equity - peak) / peak
-    remaining = max(Decimal(0), equity - peak * Decimal("0.85"))
+    remaining = max(Decimal(0), equity - peak * (1 - HARD_STOP_DRAWDOWN))
     mode = "hard_stop" if state["hard_stop"] else "restricted" if state["restricted"] else "normal"
     if mode == "hard_stop":
         scale, trade_budget = 0.0, Decimal(0)
     elif mode == "restricted":
-        scale = float(min(Decimal("0.25"), Decimal("0.25") * remaining / (peak * Decimal("0.05"))))
+        band = peak * (HARD_STOP_DRAWDOWN - RESTRICTED_DRAWDOWN)
+        scale = float(min(Decimal("0.25"), Decimal("0.25") * remaining / band))
         trade_budget = min(equity * Decimal("0.005") * money(scale), remaining * Decimal("0.10"))
     else:
         scale, trade_budget = 1.0, equity * Decimal("0.005")

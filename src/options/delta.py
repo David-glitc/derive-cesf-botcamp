@@ -7,6 +7,7 @@ Outstanding orders are an interval of possible fills, not credited as hedges.
 from dataclasses import dataclass, asdict
 from decimal import Decimal, ROUND_FLOOR
 import math
+from src.risk.exposure import BASELINE_EXPOSURE, exposure_limits
 
 
 def decimal(value):
@@ -66,9 +67,12 @@ class DeltaPolicy:
         return asdict(self)
 
 
-def account_policy(spot, equity, *, scale=1, net_fraction=.20, gross_fraction=.30, **kwargs):
+def account_policy(spot, equity, *, scale=1, net_fraction=.20, gross_fraction=.30,
+                   exposure_profile=BASELINE_EXPOSURE, **kwargs):
     spot, equity, scale = float(decimal(spot)), float(decimal(equity)), float(decimal(scale))
-    if equity <= 0 or not 0 <= scale <= 1 or not 0 < net_fraction <= .20 or not 0 < gross_fraction <= .30:
+    limits = exposure_limits(exposure_profile, kwargs.get("underlying"))
+    if (equity <= 0 or not 0 <= scale <= 1 or not 0 < net_fraction <= limits["option_net"]
+            or not 0 < gross_fraction <= limits["option_gross"]):
         raise ValueError("invalid_delta_account_budget")
     return DeltaPolicy(spot=spot, net_cap_quote=equity * net_fraction * scale,
                        gross_cap_quote=equity * gross_fraction * scale, **kwargs)

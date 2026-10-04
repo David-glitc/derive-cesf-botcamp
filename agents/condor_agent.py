@@ -41,16 +41,16 @@ def decide(snapshot: dict, active: bool = False) -> AgentDecision:
         return AgentDecision("HALT", reason="stale_data", halt=True)
     if not 0 <= values["efficiency"] <= 1 or values["volume_ratio"] < 0:
         return AgentDecision("HALT", reason="invalid_snapshot", halt=True)
-    from src.risk.competition import POLICY
+    from src.risk.competition import POLICY, HARD_STOP_DRAWDOWN, RESTRICTED_DRAWDOWN
     competition = snapshot.get("risk_policy") == POLICY
     restricted = competition and snapshot.get("risk_mode") == "restricted"
     if competition:
         mode = snapshot.get("risk_mode")
         if mode not in ("normal", "restricted", "hard_stop"):
             return AgentDecision("HALT", reason="invalid_risk_mode", halt=True)
-        if mode == "hard_stop" or values["peak_dd"] <= -.15:
+        if mode == "hard_stop" or values["peak_dd"] <= -float(HARD_STOP_DRAWDOWN):
             return AgentDecision("HALT", reason="competition_hard_stop", halt=True)
-        if mode == "normal" and values["peak_dd"] <= -.10:
+        if mode == "normal" and values["peak_dd"] <= -float(RESTRICTED_DRAWDOWN):
             return AgentDecision("HALT", reason="risk_mode_mismatch", halt=True)
     elif values["daily_pnl_pct"] <= -0.02 or values["peak_dd"] <= -0.04:
         return AgentDecision("HALT", reason="loss_guard", halt=True)
@@ -97,6 +97,11 @@ def options_context(snapshot: dict, now: float) -> dict:
     from src.options.delta import delta_context
     context = delta_context(snapshot.get("spread_plan"), now)
     context["execution_mode"] = "shadow_only"
+    execution = snapshot.get("options_execution")
+    if isinstance(execution, dict) and execution.get("adapter") == "derive_v2_atomic_rfq":
+        context["execution_mode"] = "atomic_rfq_v2"
+        context["execution_phase"] = str(execution.get("phase", "unavailable"))[:32]
+        context["live_execution_verified"] = False
     context["intent"] = "bounded_directional_spread_not_delta_neutral"
     context["risk_mode"] = snapshot.get("risk_mode") if snapshot.get("risk_mode") in ("normal", "restricted", "hard_stop") else "unavailable"
     context["remaining_loss_buffer"] = number(snapshot.get("remaining_loss_buffer"))

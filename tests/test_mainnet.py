@@ -88,6 +88,18 @@ def test_preflight_handles_empty_profile_without_uncontrolled_error(tmp_path):
         validate_profiles(tmp_path)
 
 
+@pytest.mark.parametrize("change", [{"manual_kill_switch": False}, {"risk_fraction": .02},
+    {"options_execution_mode": "v3"}, {"total_amount_quote": 1600}])
+def test_optional_rfq_samples_cannot_silently_unpause_or_widen_risk(tmp_path, change):
+    shutil.copytree(ROOT / "conf", tmp_path / "conf")
+    shutil.copyfile(ROOT / "hummingbot-version.json", tmp_path / "hummingbot-version.json")
+    path = tmp_path / "conf/controllers/conf_flyby_options_eth.yml"
+    profile = yaml.safe_load(path.read_text())
+    path.write_text(yaml.safe_dump({**profile, **change}))
+    with pytest.raises(ValueError, match="fixed_paused_rfq_settings_required"):
+        validate_profiles(tmp_path)
+
+
 @pytest.mark.parametrize("change", [{"risk_fraction": .01}, {"max_notional_fraction": .30},
     {"leverage": 3}, {"total_amount_quote": 1600}, {"condor_active": True},
     {"signal_source": "derive_native"}, {"id": "new-history"}, {"interval": "15m"}])

@@ -4,7 +4,7 @@ Run one deterministic Flyby policy through Hummingbot's Derive perpetual
 mainnet adapter. ETH/BTC are primary candidates; SOL/HYPE are fallback profiles.
 The team chooses the enabled markets and account universe.
 
-Fixed submission identity: `flyby-baseline-dd10-dd15-v1`. Condor discovers agent
+Fixed submission identity: `flyby-baseline-dd15-dd25-v1`. Condor discovers agent
 `flyby` and explicit loop `flyby.flyby_operator`; see the
 [Condor installation guide](condor/INSTALL.md). All samples remain paused.
 The [final Condor verification report](reports/CONDOR_FINAL_VERIFICATION.md)
@@ -12,15 +12,29 @@ records discovery/tick/install evidence and the remaining production gates.
 
 **Current verdict: not cleared for live trading.** Contract tests pass in
 Hummingbot v2.17.0, but stress replay remains negative after risk mitigations.
-Option spreads are shadow plans, not live orders. Read the
+Default profiles keep option spreads in shadow mode. A separately configured
+[atomic RFQ lane](OPTIONS_EXECUTION.md) implements entry, paired exits and durable
+recovery; mainnet option fills remain unverified. Read the
 [stress report](reports/STRESS_REPORT.md) and [launch gates](COMPETITION_READINESS.md).
-The latest [competition risk/turnover report](reports/COMPETITION_RISK_TURNOVER_REPORT.md)
-covers the approved −10% restricted / −15% hard stop and the unpromoted scalp
-candidate. Higher modeled volume did not improve net P&L.
+The historical [competition risk/turnover report](reports/COMPETITION_RISK_TURNOVER_REPORT.md)
+tested the earlier −10% restricted / −15% hard-stop policy and the unpromoted
+scalp candidate. Higher modeled volume did not improve net P&L. The current
+policy restricts trading at −15% and halts at −25%; historical performance
+reports do not validate these wider limits. See the
+[policy update verification](reports/DRAWDOWN_POLICY_UPDATE.md).
 The [delta/options report](reports/DELTA_OPTIONS_REPORT.md) covers delta-aware
 shadow sizing, Condor context, dynamic paper exits and twenty 48-hour proxy cases.
+The latest [two-year evaluation](reports/TWO_YEAR_OPTIONS_PERPS_REPORT.md) uses
+free, checksummed candle/IV history and one shared $800 combined account.
+Current-lot options remain blocked; combined P&L is −10.10% base / −10.18% cost
+stress in the model. [Reproduce the evaluation](backtest/TWO_YEAR_REPLAY.md)
+without changing live profiles or submitting orders.
 
 ## Submission files
+
+[Bounded Condor runtime oversight](RUNTIME_OVERSIGHT.md) adds private continuous
+state publication and reviewed adjustment tools. It is opt-in, off in submitted
+samples and not evidence of a profitable adaptive strategy.
 
 | Component | File | Responsibility |
 |---|---|---|
@@ -34,6 +48,7 @@ shadow sizing, Condor context, dynamic paper exits and twenty 48-hour proxy case
 | Risk | [position sizing](src/risk/position_sizing.py) | Exposure, drawdown scaling, costs and executable depth |
 | Competition governor | [account risk state](src/risk/competition.py) | Shared restart-persistent loss latches, consumed signals and cooldowns |
 | Options | [spread builder](src/options/spread_builder.py) | Matched call/put debit-spread plans, no order sender |
+| Atomic options | [RFQ lifecycle](src/execution/options_rfq.py) / [transport](src/execution/derive_rfq.py) | Opt-in v2 spread execution; exact position/transaction reconciliation |
 | Configuration | [launcher](conf/scripts/conf_v2_flyby.yml) | ETH selected, paused; team explicitly enables others |
 
 The [artifact index](SUBMISSION_ARTIFACT.md) lists required dependencies.

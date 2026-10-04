@@ -15,7 +15,9 @@ Required runtime files:
 - `src/data/` and `src/accounting/context.py` (public schemas and read-only reporting)
 - `src/execution/` (pure models plus opt-in stock-connector compatibility delegates)
 - `src/accounting/derive_margin.py` and `src/risk/venue_sizing.py`
-- `src/risk/competition.py` (account-bound −10%/−15% governor and persisted entry signals)
+- `src/risk/competition.py` (account-bound −15%/−25% governor and persisted entry signals)
+- `src/runtime/` and `RUNTIME_OVERSIGHT.md` (opt-in private feed, bounded adjustment handlers and Condor/MCP integration; off by default)
+- `condor/profiles/flyby_observe_48h.yml`, `condor/OBSERVATION_RUN.md` and `scripts/prepare_observation_profile.py` (separate paused read-only loop preparation, not live activation)
 - `pyproject.toml` (install shared modules into the execution environment)
 - Selected `conf/controllers/conf_flyby_{eth,btc,sol,hype}.yml`
 - `conf/scripts/conf_v2_flyby.yml`
@@ -28,7 +30,7 @@ wrapper imports the canonical V2 controller. It doesn't duplicate the strategy
 or create a separate private Derive order client.
 The entrypoint is `condor/flyby/AGENT.md` plus
 `condor/flyby/loops/flyby_operator/loop.md`, not the Python policy alone.
-The fixed identity is `flyby-baseline-dd10-dd15-v1` in `condor/flyby/PROFILE.yml`.
+The fixed identity is `flyby-baseline-dd15-dd25-v1` in `condor/flyby/PROFILE.yml`.
 Follow [Condor installation](condor/INSTALL.md): `scripts/install_condor.py`
 copies authored files into an explicit new `flyby` agent home without starting
 a loop or replacing the coordinator. The ZIP includes these files; a GitHub
@@ -57,9 +59,17 @@ and remaining gates. Keep Z3/research tooling out of running controllers.
 The team chooses the account universe and enabled markets. ETH is selected in
 the sample launcher; every sample is paused with `manual_kill_switch: true`.
 SOL/HYPE are opt-in fallback profiles, subject to listing, candles and account
-permissions. Keep options/portfolio margin/spot hedging disabled.
+permissions. Default profiles keep options disabled; separately installed
+paused RFQ profiles require explicit operator selection and mainnet verification.
+Keep portfolio margin and spot hedging disabled. Include
+`src/execution/derive_rfq.py`, `src/execution/options_rfq.py`, both
+`conf_flyby_options_*.yml` profiles and [their setup guide](OPTIONS_EXECUTION.md).
+The separate paused `conf_flyby_eth_exposure_test.yml` and
+`src/risk/exposure.py` carry the approved ETH-only exposure identity. They do not
+replace the fixed baseline or default launcher; see the
+[test limits and measured results](reports/ETH_EXPOSURE_TEST_REPORT.md).
 All four profiles share `risk_state_id: flyby-competition` and the approved
-`flyby-dd10-dd15-v1` risk policy. Entry/hold defaults remain baseline and paused.
+`flyby-dd15-dd25-v1` risk policy. Entry/hold defaults remain baseline and paused.
 Use `scripts/prepare_competition_profile.py` only to create a separate paused
 research profile; the scalp candidate isn't promoted. Read the
 [latest risk/turnover report](reports/COMPETITION_RISK_TURNOVER_REPORT.md).
@@ -68,6 +78,11 @@ sizing and fresh public-chain shadow context. `src/options/delta.py` is a shared
 runtime dependency, not an option/hedge order sender. Samples remain paused.
 
 See [readiness gates](COMPETITION_READINESS.md) before enabling trading.
+The [two-year report](reports/TWO_YEAR_OPTIONS_PERPS_REPORT.md) and
+[replay instructions](backtest/TWO_YEAR_REPLAY.md) record free public input
+coverage, one-$800-account comparisons and remaining economic/option-size blockers.
+Research harnesses don't form another trading runner; raw data and traces stay
+outside the submission. No historical option fills or profitable edge are claimed.
 The [final hardening report](reports/FINAL_SUBMISSION_REPORT.md) records offline
 compatibility checks and cost/capacity diagnostics. A final review archive can
 be built without uploading or committing anything:

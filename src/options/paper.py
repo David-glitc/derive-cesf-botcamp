@@ -68,9 +68,10 @@ def close_quote(quote, amount, side, now):
 
 def live_options_status():
     return {"live_options_enabled": False, "live_execution_verified": False,
-            "reason": "installed_hummingbot_has_no_paired_options_adapter",
-            "required": ["option instrument/rule support", "paired placement and close",
-                         "partial-fill containment", "margin/fill/restart reconciliation"],
+            "reason": "atomic_rfq_adapter_requires_explicit_operator_configuration",
+            "available_adapter": "derive_v2_atomic_rfq",
+            "required": ["options_enabled with rfq_v2 mode", "mainnet account and venue verification",
+                         "fresh native option chain", "operator launch approval"],
             "orders_submitted": 0}
 
 

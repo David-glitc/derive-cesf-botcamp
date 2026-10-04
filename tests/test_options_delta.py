@@ -154,11 +154,11 @@ def test_unpriceable_exposure_halts_without_fictitious_fill_and_restores():
 
 def test_paper_uses_shared_competition_risk_not_old_four_percent_guard():
     engine = PaperOptions()
-    engine.cash = 720
+    engine.cash = 680
     row = smoke_rows()[0]
     engine.step(row)
     assert engine.summary()["risk_policy"]["risk_mode"] == "restricted"
-    engine.cash = 680
+    engine.cash = 600
     row = deepcopy(row)
     row["time"] += 1
     engine.step(row)

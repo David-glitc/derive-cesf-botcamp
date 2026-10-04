@@ -14,12 +14,15 @@ from scripts.check_condor_package import validate_package
 from scripts.check_mainnet import validate_profiles
 
 ROOT_FILES = ("README.md", "strategy.md", "FLYBY_spec.md", "MAINNET_SETUP.md", "COMPETITION_READINESS.md",
+              "OPTIONS_EXECUTION.md", "RUNTIME_OVERSIGHT.md",
               "SUBMISSION_ARTIFACT.md", "SUBMISSION_UPDATE_CHECKLIST.md", "SUBMISSION_POSITIONING.md",
+              "BOTCAMP_STRATEGY_DESCRIPTION.md",
               "hummingbot-version.json", "pyproject.toml", "requirements.txt")
 SCRIPTS = ("install_hummingbot.sh", "check_mainnet.py", "hummingbot_compat.py", "test_hummingbot.sh",
            "check_condor_package.py", "install_condor.py", "verify_condor_runtime.py",
            "build_submission.py", "inspect_market_rules.py",
            "prepare_competition_profile.py",
+           "prepare_observation_profile.py",
            "capture_derive_public.py", "validate_flyby.py")
 TREES = {"agents": {".py"}, "src": {".py"}, "controllers": {".py"}, "conf": {".yml"},
          "condor": {".md", ".py", ".yml"}, "tests": {".py"}, "verification": {".md", ".py"},

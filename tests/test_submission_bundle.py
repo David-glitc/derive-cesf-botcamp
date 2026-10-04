@@ -23,7 +23,13 @@ def test_curated_bundle_has_runtime_without_operational_state():
     assert {"src/execution/derive_hb.py", "src/accounting/derive_margin.py", "scripts/hummingbot_compat.py",
             "controllers/directional_trading/flyby.py", "condor/flyby/AGENT.md",
             "condor/flyby/PROFILE.yml", "condor/flyby/loops/flyby_operator/loop.md",
-            "scripts/install_condor.py", "scripts/verify_condor_runtime.py"} <= names
+            "scripts/install_condor.py", "scripts/verify_condor_runtime.py",
+            "src/runtime/control.py", "src/runtime/bridge.py", "src/runtime/condor_adapter.py",
+            "src/runtime/mcp_server.py", "src/runtime/__init__.py", "RUNTIME_OVERSIGHT.md",
+            "src/runtime/observation.py", "scripts/prepare_observation_profile.py",
+            "condor/profiles/flyby_observe_48h.yml",
+            "SUBMISSION_POSITIONING.md", "SUBMISSION_UPDATE_CHECKLIST.md",
+            "BOTCAMP_STRATEGY_DESCRIPTION.md"} <= names
     assert not any(n.startswith(("data/", ".local_harness/", "runtime/")) for n in names)
     assert not any(".env" in n or n.endswith((".jsonl", ".png", ".log")) for n in names)
     assert inspect_files(paths, ROOT)
@@ -46,7 +52,7 @@ def test_bundle_manifest_matches_every_source_and_never_overwrites(tmp_path):
         for name, expected in m["source_sha256"].items():
             assert hashlib.sha256(archive.read("flyby-submission/" + name)).hexdigest() == expected
         assert m["worktree_dirty"] is None or isinstance(m["worktree_dirty"], bool)
-        assert m["strategy_profile_id"] == "flyby-baseline-dd10-dd15-v1"
+        assert m["strategy_profile_id"] == "flyby-baseline-dd15-dd25-v1"
         assert m["condor_loop_id"] == "flyby.flyby_operator"
     with pytest.raises(FileExistsError): build(target)
 

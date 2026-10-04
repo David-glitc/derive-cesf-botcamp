@@ -1,0 +1,35 @@
+# User-approved exposure-only ETH test. PAUSED; not the fixed submission identity.
+# Select only one RFQ controller/account. Keep the existing shared risk checkpoint.
+id: flyby-eth-cap-test-001
+controller_name: derive_cesf_long_vol
+controller_type: directional_trading
+manual_kill_switch: true
+connector_name: derive_perpetual
+trading_pair: ETH-USDC
+candles_connector: binance_perpetual
+candles_trading_pair: ETH-USDT
+interval: 5m
+vol_lookback: 100
+total_amount_quote: 800
+leverage: 2
+position_mode: ONEWAY
+cooldown_time: 300
+strategy_profile: baseline
+exposure_profile: eth_exposure_40_75_v1
+risk_policy: flyby-dd15-dd25-v1
+risk_state_id: flyby-competition
+risk_fraction: 0.005
+max_notional_fraction: 0.40
+max_gross_exposure_fraction: 0.40
+option_gross_fraction: 0.75
+max_slippage: 0.0015
+max_basis: 0.03
+condor_active: false
+options_enabled: true
+options_execution_mode: rfq_v2
+options_signal_enabled: true
+option_buy_moneyness: any
+option_buy_delta_target: 0.50
+option_sell_delta_target: 0.25
+portfolio_margin: false
+spot_hedge_enabled: false

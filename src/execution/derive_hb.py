@@ -27,6 +27,10 @@ async def position_map(connector, rows):
         raise ValueError("incomplete_position_snapshot")
     positions = {}
     for row in rows:
+        if row.get("instrument_type") == "option" and getattr(connector, "_flyby_rfq_enabled", False):
+            # Retain options in the FULL account snapshot. Never map them to
+            # perp positions or send them through PositionExecutor.
+            continue
         if row.get("instrument_type") != "perp":
             raise ValueError("unsupported_account_position")
         pair = await connector.trading_pair_associated_to_exchange_symbol(row["instrument_name"])
@@ -59,7 +63,8 @@ async def update_balances(connector):
         if not isinstance(response, dict) or response.get("error") or "result" not in response:
             raise ValueError("account_refresh_failed")
         observed = connector.current_timestamp or time.time()
-        state = margin_snapshot(response["result"], connector._subacct_id, observed)
+        state = margin_snapshot(response["result"], connector._subacct_id, observed,
+                                allow_options=getattr(connector, "_flyby_rfq_enabled", False))
         positions = await position_map(connector, state["positions"])
         if generation != connector._flyby_account_generation:
             raise ValueError("account_changed_during_refresh")

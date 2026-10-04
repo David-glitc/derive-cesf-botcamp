@@ -20,8 +20,8 @@ def decimal(value):
     return result
 
 
-def margin_snapshot(result, expected_subaccount, observed_at):
-    """Accept only full SM snapshots with USDC collateral and perpetual positions.
+def margin_snapshot(result, expected_subaccount, observed_at, *, allow_options=False):
+    """Accept full SM/USDC snapshots; option inventory requires explicit RFQ opt-in.
 
     We cap usable notional by the net margin cushion without multiplying by
     leverage. This is conservative capacity, not withdrawable cash or a promise
@@ -53,8 +53,12 @@ def margin_snapshot(result, expected_subaccount, observed_at):
             raise ValueError("borrowed_collateral_not_supported")
         balances["USDC"] = amount
     for row in positions:
-        if row.get("instrument_type") != "perp":
+        if row.get("instrument_type") != "perp" and not (allow_options and row.get("instrument_type") == "option"):
             raise ValueError("unsupported_account_position")
+        if row.get("instrument_type") == "option":
+            if not isinstance(row.get("instrument_name"), str) or not row["instrument_name"]:
+                raise ValueError("invalid_option_position")
+            decimal(row["amount"])
     capacity = max(Decimal(0), min(equity, initial + orders_margin, balances.get("USDC", Decimal(0))))
     return {"equity": equity, "available": capacity, "initial_margin": initial,
             "maintenance_margin": maintenance, "open_orders_margin": orders_margin,

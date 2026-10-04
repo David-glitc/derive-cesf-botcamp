@@ -17,6 +17,8 @@ data/
 # Local trading/runtime state. Keep credentials, account snapshots, raw fills,
 # and operational logs out of the public repository.
 runtime/
+!src/runtime/
+!src/runtime/*.py
 private/
 ops/
 account_snapshots/

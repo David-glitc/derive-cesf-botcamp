@@ -10,6 +10,8 @@ sys.path.insert(0, str(ROOT))
 
 from agents.mainnet import execution_environment, validate_installed_endpoints
 from scripts.check_condor_package import FIXED_SETTINGS, exact
+from src.risk.exposure import ETH_EXPOSURE_TEST
+from src.risk.competition import POLICY
 
 
 def validate_profiles(root=ROOT):
@@ -24,7 +26,7 @@ def validate_profiles(root=ROOT):
             raise ValueError(f"paused_install_profile_required:{name}")
         if profile.get("trading_pair") != name.upper() + "-USDC":
             raise ValueError(f"hummingbot_quote_pair_required:{name}")
-        if (profile.get("risk_policy") != "flyby-dd10-dd15-v1"
+        if (profile.get("risk_policy") != POLICY
                 or profile.get("risk_state_id") != "flyby-competition"
                 or profile.get("strategy_profile") != "baseline"):
             raise ValueError(f"reviewed_competition_risk_profile_required:{name}")
@@ -37,6 +39,28 @@ def validate_profiles(root=ROOT):
                 or profile.get("candles_connector") != "binance_perpetual"
                 or profile.get("candles_trading_pair") != name.upper() + "-USDT"):
             raise ValueError(f"fixed_submission_settings_required:{name}")
+    for name in ("eth", "btc"):
+        optional = root / f"conf/controllers/conf_flyby_options_{name}.yml"
+        if not optional.exists():
+            continue
+        rfq = yaml.safe_load(optional.read_text())
+        expected = {**FIXED_SETTINGS, "id": f"flyby-{name}-001", "trading_pair": name.upper() + "-USDC",
+                    "candles_connector": "binance_perpetual", "candles_trading_pair": name.upper() + "-USDT",
+                    "options_enabled": True, "options_execution_mode": "rfq_v2"}
+        if (not isinstance(rfq, dict) or set(rfq) != set(expected)
+                or any(not exact(rfq.get(k), v) for k, v in expected.items())):
+            raise ValueError(f"fixed_paused_rfq_settings_required:{name}")
+    candidate = root / "conf/controllers/conf_flyby_eth_exposure_test.yml"
+    if candidate.exists():
+        expected = {**FIXED_SETTINGS, "id": "flyby-eth-cap-test-001", "trading_pair": "ETH-USDC",
+                    "candles_connector": "binance_perpetual", "candles_trading_pair": "ETH-USDT",
+                    "options_enabled": True, "options_execution_mode": "rfq_v2",
+                    "exposure_profile": ETH_EXPOSURE_TEST, "max_notional_fraction": .40,
+                    "max_gross_exposure_fraction": .40, "option_gross_fraction": .75}
+        raw = yaml.safe_load(candidate.read_text())
+        if (not isinstance(raw, dict) or set(raw) != set(expected)
+                or any(not exact(raw.get(k), v) for k, v in expected.items())):
+            raise ValueError("fixed_paused_eth_exposure_test_settings_required")
     launcher = yaml.safe_load((root / "conf/scripts/conf_v2_flyby.yml").read_text())
     allowed = {f"conf_flyby_{name}.yml" for name in ("eth", "btc", "sol", "hype")}
     selected = launcher.get("controllers_config") if isinstance(launcher, dict) else None

@@ -2,6 +2,8 @@
 from __future__ import annotations
 import math
 from dataclasses import dataclass
+from src.risk.exposure import BASELINE_EXPOSURE, exposure_limits
+from src.risk.competition import HARD_STOP_DRAWDOWN
 
 
 @dataclass(frozen=True)
@@ -31,7 +33,8 @@ def risk_size(*, equity: float, available: float, committed: float, confidence: 
               stop_pct: float, gross_cap: float, risk_fraction: float = 0.005,
               notional_fraction: float = 0.20, peak_dd: float = 0.0,
               drawdown_limit: float = .04, size_scale: float | None = None,
-              trade_risk_budget: float | None = None) -> float:
+              trade_risk_budget: float | None = None, exposure_profile=BASELINE_EXPOSURE,
+              underlying=None) -> float:
     values = (equity, available, committed, confidence, stop_pct, gross_cap, risk_fraction, notional_fraction,
               peak_dd, drawdown_limit, 1.0 if size_scale is None else size_scale,
               equity * risk_fraction if trade_risk_budget is None else trade_risk_budget)
@@ -39,9 +42,13 @@ def risk_size(*, equity: float, available: float, committed: float, confidence: 
         return 0.0
     if min(available, committed, gross_cap) < 0 or not 0 <= confidence <= 1:
         return 0.0
-    if not 0 < risk_fraction <= 0.02 or not 0 < notional_fraction <= 0.30:
+    try:
+        limits = exposure_limits(exposure_profile, underlying)
+    except ValueError:
         return 0.0
-    if not 0 < drawdown_limit <= .15 or (size_scale is not None and not 0 <= size_scale <= 1):
+    if not 0 < risk_fraction <= 0.02 or not 0 < notional_fraction <= limits["perp_notional"]:
+        return 0.0
+    if not 0 < drawdown_limit <= float(HARD_STOP_DRAWDOWN) or (size_scale is not None and not 0 <= size_scale <= 1):
         return 0.0
     if trade_risk_budget is not None and trade_risk_budget < 0:
         return 0.0

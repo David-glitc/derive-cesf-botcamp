@@ -1,0 +1,26 @@
+# Operator override template, NOT the default config of a discovered loop.
+# Launch with --observation-hours 48, without --enable-controls.
+server_name: ''
+agent_key: ''
+total_amount_quote: 800
+frequency_sec: 60
+tick_timeout_sec: 30
+execution_mode: loop
+max_ticks: 0
+restart_on_boot: false
+bot_mode: bot
+bot_name: flyby-flyby_operator
+canvas_enabled: false
+trading_context: >-
+  Read-only 48-hour observation of flyby-baseline-dd15-dd25-v1 through the explicit
+  observation launcher. Read runtime state/events and record freshness, risk,
+  positions, orders, executor/options lifecycle and observed PnL/turnover only.
+  Missing values are unknown. No adjustments, deployment, config writes, bot
+  adoption, orders or position shutdown. Report OBSERVE or HOLD_UNVERIFIED.
+  The observation deadline ends this session, not the Hummingbot bot.
+risk_limits:
+  max_position_size_quote: 160
+  max_open_executors: 1
+  max_leverage: 2
+  max_drawdown_pct: -1
+  shutdown_drawdown_pct: -1

@@ -1,4 +1,4 @@
-# Mainnet only. ETH: reviewer-selected primary; no live options adapter.
+# Mainnet only. ETH: reviewer-selected primary; options shadow-only in this profile.
 id: flyby-eth-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
@@ -14,7 +14,7 @@ leverage: 2
 position_mode: ONEWAY
 cooldown_time: 300
 strategy_profile: baseline
-risk_policy: flyby-dd10-dd15-v1
+risk_policy: flyby-dd15-dd25-v1
 risk_state_id: flyby-competition
 risk_fraction: 0.005
 max_notional_fraction: 0.20

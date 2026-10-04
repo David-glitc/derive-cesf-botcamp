@@ -19,16 +19,16 @@ the controller's risk checks.
 | Active mode | Normal mode volume ≥1.10× and trend ≥0.70; never relax restricted gates or hard stop |
 | No clean signal | No entry; signal invalidation closes an existing executor |
 | Size | ≤0.5% of budget × confidence / stop distance; also ≤20% notional and available funds |
-| Restricted mode | At −10% peak-relative drawdown: latch restricted mode, confidence ≥0.85, trend ≥1.5, efficiency ≥0.45, current/previous volume ≥1.5; size ≤25%, shrinking through the remaining buffer |
+| Restricted mode | At −15% peak-relative drawdown: latch restricted mode, confidence ≥0.85, trend ≥1.5, efficiency ≥0.45, current/previous volume ≥1.5; size ≤25%, shrinking through the remaining buffer |
 | Portfolio | 30% gross cap; entries require account flat with no working orders; process-wide proposal reservation |
 | Stops | ATR-dependent 0.3–1.5% price stop; target 1.5–2× stop; baseline roughly 1–3h hold, capped 6h; 5m scalp candidate 10–30m |
 | Costs | Target ≥3× modeled round-trip cost, ≥4× restricted; include entry/exit fee rates, per-order base fees, exit slippage reserve and funding |
 | Entry | Depth-checked marketable LIMIT, quantity quantized to venue rules, 30s unfilled-entry timeout |
 | Exit | Hummingbot triple-barrier MARKET stop/profit/time exits; controller sends early-stop on halt/invalidation |
-| Hard halt | At −15% peak-relative drawdown: persist hard-stop latch, no new entries, cancel/close owned executors; no automatic reset |
+| Hard halt | At −25% peak-relative drawdown: persist hard-stop latch, no new entries, cancel/close owned executors; no automatic reset |
 
 The approved starting budget is also a floor for the peak baseline. With a peak
-of $800, $720 enters restricted mode and $680 triggers the hard stop. Profits
+of $800, $680 enters restricted mode and $600 triggers the hard stop. Profits
 raise the peak, so thresholds rise too. Daily loss is diagnostic, not an independent
 −2% veto in this competition policy. Restricted modeled trade risk cannot exceed
 10% of the remaining dollar loss buffer. Actual losses can exceed the model.
@@ -96,22 +96,24 @@ profit, −18% stop, signal invalidation, 6h hold or expiry within 6h. Fresh leg
 deltas are recomputed for actual filled quantities; cap breach or invalid
 delta closes when executable books exist and halts subsequent entries. Missing
 close books retain unresolved exposure, null equity and a latched paper halt.
-No ITM condition is required. The paper harness uses the same −10%/−15%
+No ITM condition is required. The paper harness uses the same −15%/−25%
 reducer; its separate account is not a merged options/perps portfolio.
 
 `plan_options()` accepts a normalized chain and IV edge. Each controller tick
 can also read a fresh checksummed public market file, use supplied instrument
 fees, and expose a shadow plan. Missing/stale public input clears the plan
-without interrupting protective perp actions. No continuous public collector,
-paired option executor or automatic perp delta hedge is implemented.
+without interrupting protective perp actions. No continuous public collector
+or automatic perp delta hedge is implemented.
 Detailed Condor context includes an allowlisted `options_delta` view. Delta
 and fee verification are separate; old manually supplied chains without fee
-metadata remain fee-unverified. Live option/hedge orders stay disabled.
+metadata remain fee-unverified. Default samples keep live option/hedge orders disabled.
 
 **Never submit these plans as two independent position executors.** The
-current controller rejects `options_enabled: true`. A future paired adapter
-must prove placement, correlation, partial-fill containment and matched
-closure before options can be live. Neither an assumed hedge nor a resting
+controller requires both `options_enabled: true` and `options_execution_mode:
+rfq_v2` for its new [atomic options adapter](OPTIONS_EXECUTION.md). It requests
+and executes a full matching spread, persists intents before writes, and requires
+an owned settled transaction plus exact authenticated positions before recording
+entry/closure. Actual mainnet placement and fills remain unverified. Neither an assumed hedge nor a resting
 limit is protection against an unmatched short option.
 
 ## Runtime safety boundaries

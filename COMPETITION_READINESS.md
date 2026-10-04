@@ -1,4 +1,63 @@
-# Live readiness — NO-GO (2026-10-02)
+# Live readiness — NO-GO (2026-10-03)
+
+The new [bounded Condor runtime extension](RUNTIME_OVERSIGHT.md) refreshes private
+controller/account state, exposes read-only tools and accepts reviewed veto,
+size-reduction, new-entry tuning and owned-close requests. It remains off in all
+shipped profiles. Its offline verification does not clear mainnet, profitability,
+provider latency, history-capacity or exchange-soak gates; the existing paired
+exit fee/recovery blocker remains unresolved. No bot was activated.
+See the [runtime verification evidence](reports/RUNTIME_OVERSIGHT_VERIFICATION.md).
+
+Current drawdown policy: `flyby-dd15-dd25-v1` enters restricted trading at
+−15% of peak equity and latches a hard stop at −25%. At an $800 peak, these
+are $680 and $600. Position caps, signals and the $800 allocation are unchanged;
+production profiles remain paused. Old-policy checkpoints fail closed and
+require operator review; no runtime state was migrated or reset. Historical
+performance below predates this change and does not establish a positive edge
+under the wider limits. See [operator state rules](MAINNET_SETUP.md#preserve-competition-drawdown-state).
+
+The [chronological alpha pass](reports/ALPHA_WALKFORWARD_REPORT.md) evaluates
+16 bounded model configurations and 12 final-year execution ablations. No model
+beats the zero-return validation benchmark; the least-bad frozen choice vetoes
+all entries, not a profitable active strategy. Baseline final-year perps/combined
+lose $53.49 base / $66.86 cost stress, and historical options still execute zero
+trades. Greek computations and lean fee/theta checks are offline research only;
+fresh public API Greeks don't establish executable or private fills.
+
+The [five-million-path portfolio screen](reports/PORTFOLIO_5M_PATHS_REPORT.md)
+rejects baseline, wider ETH and hypothetical combined profiles from the research
+shortlist under the requested $500 intra-path loss/drawdown rule. Ordinary
+empirical cases have no $500 breach but negative mean P&L; the declared extreme
+gap/fee stresses breach the limit. This is conditional Monte Carlo evidence,
+not a live-market loss probability or a controller/Condor execution soak.
+Production profiles and persistent risk state were not changed.
+
+The latest [options construction/fee audit](reports/OPTIONS_EXECUTION_FEE_AUDIT.md)
+reproduces an exit-fee-cap rejection with both paired legs retained and an
+unresolved execution intent. Normal controlled closes pass, but this fee/recovery
+blocker must be fixed and revalidated before activation. No production strategy
+or risk-budget change was made by the diagnostic pass.
+
+The separate [approved ETH exposure test](reports/ETH_EXPOSURE_TEST_REPORT.md)
+is implemented and paused. Its six-case replay still executes zero options and
+loses $80.04 base / $80.10 cost stress in perps/combined. The ten-case baseline
+regression matches prior results exactly; wider caps are not a live promotion.
+
+Latest two-year evaluation: 18 fixed-policy cases on checksummed free public
+underlying/IV history. Current-lot options execute zero trades; perps and combined
+cases lose $80.83 base / $81.45 cost stress from a shared $800 account. Conservative
+venue minimums and fee-adjusted spread gates remain binding; finer-lot diagnostics
+don't fix them. No candidate is promoted. Read the
+[two-year measured report](reports/TWO_YEAR_OPTIONS_PERPS_REPORT.md).
+
+Latest implementation: [atomic option RFQs](OPTIONS_EXECUTION.md) now have a
+real v2 transport/signer, canonical controller wiring, paired exits and durable
+restart reconciliation. Two separate profiles install paused. Network-disabled
+tests exercise the actual Hummingbot classes; no mainnet option order was sent.
+This fixes the missing-code gap, not the private-fill or profitability gates.
+The final options pass recorded 2,881 pinned tests, the 600-spread virtual
+fault campaign and a real Condor mocked-provider tick; see the
+[atomic options evidence](reports/ATOMIC_OPTIONS_EXECUTION_REPORT.md).
 
 The Condor packaging blocker is fixed: explicit identity/loop, fixed baseline
 profile and no-overwrite installer. The latest pass includes 2,683 host and
@@ -7,7 +66,7 @@ models and extracted-archive installations. See the
 [final Condor report](reports/CONDOR_FINAL_VERIFICATION.md). Real provider/API,
 private execution/restart and positive-edge gates remain unverified.
 
-Latest milestone: the user-approved −10% restricted / −15% hard-stop policy
+Earlier milestone: the user-approved −10% restricted / −15% hard-stop policy
 has account-bound persistent latches, completed-signal/cooldown protection and
 actual pinned action tests. The optional 30m scalp candidate raises turnover
 but worsens net P&L, so baseline samples remain paused and unchanged in signal
@@ -46,7 +105,7 @@ verify the team's mainnet account; installation doesn't migrate credentials.
 | Account margin/cache | Opt-in full authenticated SM snapshot parser, signed net-margin cushion, atomic full position replacement including empty lists | Fixture-tested; team account schema/refresh not cleared |
 | Venue sizing | BASE-USDC mapping, exact lot/tick rules, explicit minimum-budget diagnostic, no cap increase | ETH/BTC currently incompatible with $160 cap |
 | Fill/funding bridge and restart | Helpers tested; exact live reconciliation absent | Not cleared |
-| Paired options lifecycle | No verified paired executor | Disabled |
+| Paired options lifecycle | Atomic v2 RFQ entry/exit/restart implemented; scripted exchange and real HB signer tested offline | Opt-in paused; mainnet fills unverified |
 | Formal paired safety model | Six exact-model SMT obligations, two detected unsafe mutations; 555 states/8,040 reducer transitions | Model verified, not exchange execution |
 
 Before live enablement, complete a 24–36h adapter soak on the final image:

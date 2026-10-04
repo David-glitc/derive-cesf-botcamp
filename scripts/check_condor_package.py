@@ -13,16 +13,18 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from src.risk.competition import POLICY, RESTRICTED_DRAWDOWN, HARD_STOP_DRAWDOWN
+from src.runtime.control import TOOLS as RUNTIME_TOOLS
 
-PROFILE_ID = "flyby-baseline-dd10-dd15-v1"
+PROFILE_ID = "flyby-baseline-dd15-dd25-v1"
 LOOP_ID = "flyby.flyby_operator"
 TOOLS = {"manage_bots", "manage_controllers", "get_market_data", "get_prices",
-         "get_portfolio_overview", "get_performance_report", "manage_agent_controllers"}
+         "get_portfolio_overview", "get_performance_report", "manage_agent_controllers"} | RUNTIME_TOOLS
 FIXED_SETTINGS = {
     "controller_name": "derive_cesf_long_vol", "controller_type": "directional_trading",
     "manual_kill_switch": True, "connector_name": "derive_perpetual", "interval": "5m",
     "vol_lookback": 100, "total_amount_quote": 800, "leverage": 2, "position_mode": "ONEWAY",
-    "cooldown_time": 300, "strategy_profile": "baseline", "risk_policy": "flyby-dd10-dd15-v1",
+    "cooldown_time": 300, "strategy_profile": "baseline", "risk_policy": POLICY,
     "risk_state_id": "flyby-competition", "risk_fraction": .005, "max_notional_fraction": .20,
     "max_slippage": .0015, "max_basis": .03, "condor_active": False, "options_enabled": False,
     "options_signal_enabled": True, "option_buy_moneyness": "any", "option_buy_delta_target": .50,
@@ -39,8 +41,8 @@ def validate_fixed_profile(directory):
     profile = yaml.safe_load((directory / "PROFILE.yml").read_text())
     identity = {"profile_id": PROFILE_ID, "agent_slug": "flyby", "loop_id": LOOP_ID,
                 "controller_name": "derive_cesf_long_vol", "execution_environment": "mainnet_legacy_v2",
-                "markets": ["ETH", "BTC", "SOL", "HYPE"], "restricted_drawdown": -.10,
-                "hard_stop_drawdown": -.15, "controller_settings": FIXED_SETTINGS}
+                "markets": ["ETH", "BTC", "SOL", "HYPE"], "restricted_drawdown": -float(RESTRICTED_DRAWDOWN),
+                "hard_stop_drawdown": -float(HARD_STOP_DRAWDOWN), "controller_settings": FIXED_SETTINGS}
     if (profile != identity or any(not exact(profile["controller_settings"].get(k), v)
                                   for k, v in FIXED_SETTINGS.items())):
         raise ValueError("fixed_submission_profile_mismatch")

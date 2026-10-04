@@ -33,7 +33,7 @@ def arm(ctl, atr=.006):
 
 def test_restricted_high_quality_entry_is_smaller_and_weak_signal_blocked(tmp_path):
     ctl, provider = controller(tmp_path)
-    account = set_equity(ctl, provider, 720)
+    account = set_equity(ctl, provider, 680)
     assert account["risk_mode"] == "restricted" and account["risk_scale"] == .25
     arm(ctl)
     ctl.processed_data["volume_ratio"] = 1.4
@@ -42,7 +42,7 @@ def test_restricted_high_quality_entry_is_smaller_and_weak_signal_blocked(tmp_pa
     action = ctl.create_actions_proposal()
     assert len(action) == 1, ctl.processed_data
     config = action[0].executor_config
-    assert config.entry_price * config.amount <= Decimal("36")
+    assert config.entry_price * config.amount <= Decimal("34")
     assert ctl.processed_data["cost_multiple"] == 4
 
 
@@ -51,7 +51,7 @@ def test_loss_between_tick_and_proposal_rechecks_restricted_gate(tmp_path):
     arm(ctl)
     ctl.processed_data["volume_ratio"] = 1.4
     # The cached decision is normal, but actual full-account equity fell.
-    provider.connector._flyby_account_state["equity"] = Decimal("720")
+    provider.connector._flyby_account_state["equity"] = Decimal("680")
     assert ctl.create_actions_proposal() == []
     assert ctl.processed_data["entry_block"] == "volume_gate"
 
@@ -60,7 +60,7 @@ def test_hard_stop_cancels_pending_and_closes_owned_executors(tmp_path):
     ctl, provider = controller(tmp_path)
     cfg = ctl.get_executor_config(TradeType.BUY, Decimal("3000"), Decimal(".01"))
     ctl.executors_info = [executor_info(cfg), executor_info(cfg, id="pending", is_trading=False)]
-    set_equity(ctl, provider, 680)
+    set_equity(ctl, provider, 600)
     assert len(ctl.stop_actions_proposal()) == 2
     assert ctl.processed_data["reason"] == "competition_hard_stop"
     assert ctl.create_actions_proposal() == []
@@ -91,7 +91,7 @@ def test_risk_disk_failure_blocks_entry_but_still_proposes_protective_close(tmp_
 
 def test_restart_new_profile_cannot_reset_hard_stop(tmp_path):
     ctl, provider = controller(tmp_path)
-    set_equity(ctl, provider, 680)
+    set_equity(ctl, provider, 600)
     cfg = DeriveCesfLongVolConfig(id="another-profile", trading_pair="ETH-USDC")
     other = DeriveCesfLongVolController(cfg, provider, asyncio.Queue())
     other._risk_path = ctl._risk_path
@@ -166,4 +166,4 @@ def test_prepared_scalp_profile_validates_with_real_hummingbot(tmp_path, market)
     output = tmp_path / "new-profile.yml"
     prepare(market, "competition_scalp", output)
     config = DeriveCesfLongVolConfig(**yaml.safe_load(output.read_text()))
-    assert config.manual_kill_switch and config.cooldown_time == 60 and config.risk_policy == "flyby-dd10-dd15-v1"
+    assert config.manual_kill_switch and config.cooldown_time == 60 and config.risk_policy == "flyby-dd15-dd25-v1"

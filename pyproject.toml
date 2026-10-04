@@ -10,9 +10,10 @@ dependencies = ["numpy>=1.24", "pandas>=2.0", "pydantic>=2.0", "requests>=2.31",
 
 [project.optional-dependencies]
 verification = ["z3-solver==4.16.0.0"]
+runtime = ["mcp==1.26.0"]
 
 [tool.setuptools.packages.find]
-include = ["agents*", "src.signal*", "src.risk*", "src.options*", "src.accounting*", "src.data*", "src.execution*"]
+include = ["agents*", "src.signal*", "src.risk*", "src.options*", "src.accounting*", "src.data*", "src.execution*", "src.runtime*"]
 namespaces = true
 
 [tool.pytest.ini_options]

@@ -15,45 +15,81 @@ from tests.test_flyby_policy import snapshot
 BINDING = "a" * 64
 
 
-@pytest.mark.parametrize("equity,mode", [(800, "normal"), ("720.000001", "normal"),
-    (720, "restricted"), ("680.000001", "restricted"), (680, "hard_stop"), (0, "hard_stop")])
+@pytest.mark.parametrize("equity,mode", [(800, "normal"), (720, "normal"), ("680.000001", "normal"),
+    (680, "restricted"), (640, "restricted"), ("600.000001", "restricted"), (600, "hard_stop"), (0, "hard_stop")])
 def test_exact_boundaries(equity, mode):
     state = advance(initial_state(800, 100, 800, BINDING), equity, 101)
     view = risk_view(state, equity)
     assert view["risk_mode"] == mode
-    assert view["remaining_loss_buffer"] == pytest.approx(max(0, float(equity) - 680))
+    assert view["remaining_loss_buffer"] == pytest.approx(max(0, float(equity) - 600))
 
 
 def test_peak_relative_drawdown_and_competition_baseline_not_capped_equity():
     state = advance(initial_state(800, 100, 800, BINDING), 1000, 101)
     state = advance(state, 900, 102)
     assert risk_view(state, 900)["peak_dd"] == -.10
-    assert state["restricted"] and not state["hard_stop"]
+    assert not state["restricted"] and not state["hard_stop"]
     state = advance(state, 850, 103)
+    assert state["restricted"] and not state["hard_stop"]
+    state = advance(state, 750, 104)
     assert state["hard_stop"]
-    assert initial_state(680, 100, 800, BINDING)["hard_stop"]
+    assert initial_state(600, 100, 800, BINDING)["hard_stop"]
 
 
 def test_restricted_and_hard_latches_survive_recovery_midnight():
-    state = advance(initial_state(800, 100, 800, BINDING), 720, 101)
+    state = advance(initial_state(800, 100, 800, BINDING), 680, 101)
     state = advance(state, 800, 86401)
     assert risk_view(state, 800)["risk_mode"] == "restricted"
     assert risk_view(state, 800)["daily_pnl_pct"] == 0
-    state = advance(state, 680, 86402)
+    state = advance(state, 600, 86402)
     state = advance(state, 900, 172801)
     assert risk_view(state, 900)["risk_mode"] == "hard_stop"
 
 
-@pytest.mark.parametrize("equity", [720, 710, 700, 690, 681])
+@pytest.mark.parametrize("equity", [680, 660, 640, 620, 601])
 def test_restricted_budget_decreases_and_caps_remaining_buffer(equity):
     view = risk_view(advance(initial_state(800, 100, 800, BINDING), equity, 101), equity)
     assert 0 < view["risk_scale"] <= .25
     assert view["risk_trade_budget"] <= .1 * view["remaining_loss_buffer"] + 1e-12
     size = risk_size(equity=equity, available=equity, committed=0, confidence=.9, stop_pct=.007,
-        gross_cap=equity * .3, peak_dd=view["peak_dd"], drawdown_limit=.15,
+        gross_cap=equity * .3, peak_dd=view["peak_dd"], drawdown_limit=.25,
         size_scale=view["risk_scale"], trade_risk_budget=view["risk_trade_budget"])
     assert size <= equity * .2 * view["risk_scale"]
     assert size * .007 <= view["risk_trade_budget"] * .9 + 1e-12
+
+
+@pytest.mark.parametrize("equity,scale", [(680, .25), (640, .125), (600, 0)])
+def test_restricted_taper_spans_ten_percentage_points(equity, scale):
+    state = advance(initial_state(800, 100, 800, BINDING), equity, 101)
+    assert risk_view(state, equity)["risk_scale"] == pytest.approx(scale)
+
+
+@pytest.mark.parametrize("old_component", ["state", "marker", "both"])
+def test_previous_policy_checkpoint_requires_review_without_reset(tmp_path, old_component):
+    path = tmp_path / "risk.json"
+    store = RiskCheckpoint(path, BINDING, 800)
+    store.observe(800, 100, allow_bootstrap=True)
+    store.consume_entry(800, 100, "ETH-USDC", 0, 60)
+    store.observe(600, 101)
+    marker = path.with_suffix(".initialized")
+    for target, component in ((path, "state"), (marker, "marker")):
+        if old_component in (component, "both"):
+            state = json.loads(target.read_text())
+            state["policy"] = "flyby-dd10-dd15-v1"
+            target.write_text(json.dumps(state))
+    before = (path.read_bytes(), marker.read_bytes())
+    with pytest.raises(ValueError, match="risk_checkpoint_contract_mismatch"):
+        RiskCheckpoint(path, BINDING, 800).observe(800, 102, allow_bootstrap=True)
+    assert (path.read_bytes(), marker.read_bytes()) == before
+
+
+@pytest.mark.parametrize("drawdown,halts", [(-.149999, False), (-.15, True),
+    (-.249999, False), (-.25, True)])
+def test_condor_competition_drawdown_boundaries(drawdown, halts):
+    mode = "normal" if drawdown >= -.15 else "restricted"
+    decision = decide({**snapshot(), "risk_policy": POLICY, "risk_mode": mode,
+                       "peak_dd": drawdown})
+    assert decision.halt is halts
 
 
 def test_checkpoint_shared_restart_profile_and_duplicate_signal(tmp_path):
@@ -64,7 +100,7 @@ def test_checkpoint_shared_restart_profile_and_duplicate_signal(tmp_path):
     other = RiskCheckpoint(path, BINDING, 800)
     assert not other.consume_entry(800, 170, "ETH-USDC", 0, 60)
     assert other.consume_entry(800, 180, "ETH-USDC", 120, 60)
-    store.observe(680, 181)
+    store.observe(600, 181)
     state, view = other.observe(850, 86401)
     assert view["risk_mode"] == "hard_stop"
     assert not other.consume_entry(850, 86401, "SOL-USDC", 86000, 60)
@@ -127,7 +163,7 @@ def test_bootstrap_requires_flat_and_clock_monotonic(tmp_path):
 def test_restricted_policy_is_stricter_even_in_condor_active_mode(active):
     normal = {**snapshot(), "risk_policy": POLICY, "risk_mode": "normal", "daily_pnl_pct": -.05, "peak_dd": -.09}
     assert decide(normal, active).signal == 1
-    restricted = {**normal, "risk_mode": "restricted", "peak_dd": -.10}
+    restricted = {**normal, "risk_mode": "restricted", "peak_dd": -.15}
     assert decide(restricted, active).signal == 1
     for field, value in (("volume_ratio", 1.4), ("trend_z", 1.4), ("efficiency", .4),
                          ("previous_volume_ratio", 1.4), ("previous_efficiency", .4)):

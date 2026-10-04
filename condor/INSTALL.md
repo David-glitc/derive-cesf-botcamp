@@ -1,7 +1,7 @@
 # Install the Flyby Condor agent
 
 Install `condor/flyby/` as agent `flyby` in your Condor agent root. Its loop is
-`flyby.flyby_operator`; its fixed profile is `flyby-baseline-dd10-dd15-v1`.
+`flyby.flyby_operator`; its fixed profile is `flyby-baseline-dd15-dd25-v1`.
 `agents/condor_agent.py` remains the shared Python policy, not the agent entrypoint.
 
 Keep the controller paused. Installation doesn't configure a model, migrate
@@ -19,7 +19,7 @@ flyby_review_root=$(mktemp -d)
 python3 scripts/install_condor.py --agents-root "$flyby_review_root/agents"
 ```
 
-Expect `structure_valid: true`, profile `flyby-baseline-dd10-dd15-v1`, loop
+Expect `structure_valid: true`, profile `flyby-baseline-dd15-dd25-v1`, loop
 `flyby.flyby_operator`, `started: false` and `orders_submitted: 0`. Reinstalling
 into the same target must fail without changing files. The installer refuses
 links, unexpected/runtime files, sample drift and changed profile settings.
@@ -49,15 +49,23 @@ the repository verifier never invokes that tool. The package follows
 
 All four samples retain baseline signals, stable controller IDs, the shared
 `flyby-competition` risk namespace, $800 reference capital and unchanged caps.
-The controller owns the −10% restricted / −15% hard-stop latches; Condor journal
+The controller owns the −15% restricted / −25% hard-stop latches; Condor journal
 drawdown is a different measurement. The team chooses compatible markets.
 Don't increase caps to meet ETH/BTC minimums.
 
-Live options, portfolio margin and spot hedging stay disabled. The loop observes
+The four samples keep live options disabled. A separate operator-approved
+[atomic RFQ profile](../OPTIONS_EXECUTION.md) is an explicit execution extension,
+not an automatic update to those samples. Portfolio margin and spot hedging
+stay disabled. The loop observes
 plans/delta and controller decisions, not independent orders or strategy tuning.
 A recurring live loop requires separate operator clearance of
 [launch gates](../COMPETITION_READINESS.md), an explicit execution-mode change
 and removal of the one-tick limit. No transition is automatic.
+
+For recurring observation without trading, use the separate
+[48-hour read-only procedure](OBSERVATION_RUN.md). It uses Condor's native loop
+and the explicit observation launcher; it doesn't change the default playbook
+or clear the live gates.
 
 ## Understand verification limits
 

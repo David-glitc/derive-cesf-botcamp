@@ -68,6 +68,9 @@ and positions. Initial margin is a signed net cushion; open-order margin is
 added to it. Missing, unhealthy, stale or unsupported snapshots block new entries.
 USDC collateral alone doesn't prove capacity. Other connectors retain their
 original executor close behavior. No LLM decides these safety checks.
+The separately selected [RFQ profiles](OPTIONS_EXECUTION.md) retain option
+positions in that full snapshot and use one atomic RFQ instead of a perpetual
+executor. Both profiles install paused and aren't selected by the default launcher.
 Reduce-only limit closes use IOC; resting reduce-only orders are rejected.
 Market orders use a signed 15bp worst-price bound around the current mid, rounded
 inside the bound. This can leave partial/unfilled closes during fast moves; it
@@ -150,12 +153,12 @@ paired live executor. Mainnet configuration isn't live certification.
 
 ## Preserve competition drawdown state
 
-The approved policy is `flyby-dd10-dd15-v1`: −10% enters restricted trading;
-−15% latches a hard stop. With an $800 peak, these are $720 and $680. Profits
+The approved policy is `flyby-dd15-dd25-v1`: −15% enters restricted trading;
+−25% latches a hard stop. With an $800 peak, these are $680 and $600. Profits
 raise the peak; the approved starting budget is its minimum baseline. Restricted
 mode raises confidence to 0.85, strengthens two-bar trend/volume confirmation,
 requires a 4× modeled cost cushion and reduces size to at most 25%, decreasing
-as the final five percentage points are consumed. Daily P&L is diagnostic.
+as the final ten percentage points are consumed. Daily P&L is diagnostic.
 
 Persist the entire owned `data/` volume. All selected profiles use the same
 `risk_state_id: flyby-competition` and $800 budget. The account-bound checkpoint
@@ -165,6 +168,13 @@ midnight, profile change or restart. Don't delete/rename the files or namespace
 to resume. Missing/corrupt/foreign state blocks entry; an unknown position isn't
 automatically adopted or declared flat. A fresh flat dedicated account can
 initialize the new state against the fixed starting budget.
+
+Checkpoints and initialization markers using the previous
+`flyby-dd10-dd15-v1` policy are rejected with
+`risk_checkpoint_contract_mismatch`, even when bootstrap is allowed. The update
+does not migrate them or reset their latches. Operator review must preserve the
+account binding, peak, entry history and any restricted/hard-stop latch before
+an explicit migration is approved. Do not delete state to bypass this check.
 
 Old `data/flyby-risk-<controller-id>.json` files cause
 `legacy_risk_checkpoint_requires_review`; keep them intact for operator review.
