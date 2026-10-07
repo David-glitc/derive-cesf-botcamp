@@ -31,13 +31,18 @@ install -m 644 "$repo_dir/controllers/directional_trading/derive_cesf_long_vol.p
 for profile in eth btc sol hype; do
   install -m 644 "$repo_dir/conf/controllers/conf_flyby_$profile.yml" "$hb_dir/conf/controllers/conf_flyby_$profile.yml"
 done
+for profile in eth sol; do
+  install -m 644 "$repo_dir/conf/controllers/conf_flyby_${profile}_active.yml" "$hb_dir/conf/controllers/conf_flyby_${profile}_active.yml"
+done
 for profile in eth btc; do
   install -m 644 "$repo_dir/conf/controllers/conf_flyby_options_$profile.yml" "$hb_dir/conf/controllers/conf_flyby_options_$profile.yml"
 done
 install -m 644 "$repo_dir/conf/controllers/conf_flyby_eth_exposure_test.yml" "$hb_dir/conf/controllers/conf_flyby_eth_exposure_test.yml"
 install -m 644 "$repo_dir/conf/scripts/conf_v2_flyby.yml" "$hb_dir/conf/scripts/conf_v2_flyby.yml"
+install -m 644 "$repo_dir/conf/scripts/conf_v2_flyby_eth_sol_active.yml" "$hb_dir/conf/scripts/conf_v2_flyby_eth_sol_active.yml"
 echo "Installed mainnet-only paused profiles (derive_perpetual, legacy v2 API)."
 echo "No account verified or bot started; the team supplies credentials and clears launch gates."
 echo "Connector compatibility is opt-in; Flyby refuses entry without it and a fresh full margin snapshot."
 echo "Optional atomic RFQ profiles are installed paused and NOT selected by the default launcher."
 echo "The separate ETH 40%/75% exposure test is paused; it does not replace the fixed submission identity."
+echo "ETH+SOL operator activation profiles are installed separately; select their launcher only after account preflight."

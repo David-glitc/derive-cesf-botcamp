@@ -1,0 +1,6 @@
+# Explicit mainnet activation launcher; profiles share risk_state_id and $800 budget.
+id: v2-flyby-eth-sol-active
+script_name: v2_with_controllers
+controllers_config:
+  - conf_flyby_eth_active.yml
+  - conf_flyby_sol_active.yml

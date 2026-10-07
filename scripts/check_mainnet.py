@@ -61,6 +61,27 @@ def validate_profiles(root=ROOT):
         if (not isinstance(raw, dict) or set(raw) != set(expected)
                 or any(not exact(raw.get(k), v) for k, v in expected.items())):
             raise ValueError("fixed_paused_eth_exposure_test_settings_required")
+
+    # Separate operator activation configs are opt-in and must match the exact
+    # reviewed ETH+SOL values; the default/sample profiles above remain paused.
+    active_common = {**FIXED_SETTINGS, "manual_kill_switch": False}
+    active_expected = {
+        "eth": {**active_common, "id": "flyby-eth-active-001", "trading_pair": "ETH-USDC",
+                "candles_connector": "binance_perpetual", "candles_trading_pair": "ETH-USDT",
+                "exposure_profile": ETH_EXPOSURE_TEST, "max_notional_fraction": .40,
+                "max_gross_exposure_fraction": .40, "option_gross_fraction": .75},
+        "sol": {**active_common, "id": "flyby-sol-active-001", "trading_pair": "SOL-USDC",
+                "candles_connector": "binance_perpetual", "candles_trading_pair": "SOL-USDT"},
+    }
+    for name, expected in active_expected.items():
+        path = root / f"conf/controllers/conf_flyby_{name}_active.yml"
+        if not path.exists():
+            raise ValueError(f"missing_operator_activation_profile:{name}")
+        profile = yaml.safe_load(path.read_text())
+        if (not isinstance(profile, dict) or set(profile) != set(expected)
+                or any(not exact(profile.get(k), v) for k, v in expected.items())):
+            raise ValueError(f"invalid_operator_activation_profile:{name}")
+
     launcher = yaml.safe_load((root / "conf/scripts/conf_v2_flyby.yml").read_text())
     allowed = {f"conf_flyby_{name}.yml" for name in ("eth", "btc", "sol", "hype")}
     selected = launcher.get("controllers_config") if isinstance(launcher, dict) else None
@@ -68,6 +89,11 @@ def validate_profiles(root=ROOT):
             or any(not isinstance(name, str) or name not in allowed for name in selected)
             or len(selected) != len(set(selected))):
         raise ValueError("approved_mainnet_launcher_required")
+    active_launcher = yaml.safe_load(
+        (root / "conf/scripts/conf_v2_flyby_eth_sol_active.yml").read_text())
+    if active_launcher != {"id": "v2-flyby-eth-sol-active", "script_name": "v2_with_controllers",
+                          "controllers_config": ["conf_flyby_eth_active.yml", "conf_flyby_sol_active.yml"]}:
+        raise ValueError("invalid_operator_activation_launcher")
     manifest = json.loads((root / "hummingbot-version.json").read_text())
     if not isinstance(manifest, dict) or manifest.get("execution_environment") != environment:
         raise ValueError("mainnet_manifest_mismatch")
