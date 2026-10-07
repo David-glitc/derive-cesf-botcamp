@@ -1,9 +1,7 @@
-"""Legacy v2 atomic RFQs over the pinned Hummingbot authenticated transport.
+"""Derive V3 atomic RFQs over the pinned Hummingbot authenticated transport.
 
-Wire schema: orderbook-stubs@db6b172d5e10553738c74ccab775ef2e7258e955.
-Signing layout: v2-action-signing-python@d1914d61985e33559244da242892c7255b6fd0ca.
-Deployment: v2-matching@f6c20f46e346151e0969777c5119c92ec21b3be8/957.
-No credential discovery, import-time requests, independent legs or v3 fallback.
+Wire/signing reference: derivexyz/derive-py@fad785e6c328746b5f8a8219e14009670bc97a35.
+No credential discovery, import-time requests, independent legs or legacy fallback.
 """
 import asyncio
 import time
@@ -18,9 +16,12 @@ RFQ_MODULE = "0x9371352CCef6f5b36EfDFE90942fFE622Ab77F1D"
 
 
 def fixed(value):
-    scaled = decimal(value) * 10 ** 18
-    if scaled != scaled.to_integral_value():
+    value = decimal(value)
+    scaled = value * 10 ** 18
+    if value % Decimal("1e-12") or scaled != scaled.to_integral_value():
         raise ValueError("rfq_precision_loss")
+    if not -(2 ** 127) <= scaled <= 2 ** 127 - 1:
+        raise ValueError("rfq_signed_value_overflow")
     return int(scaled)
 
 
@@ -84,8 +85,15 @@ class DeriveRFQTransport:
             raise ValueError("reviewed_connector_compatibility_required")
         self.connector, self.constants = connector, constants
 
+    api_generation = "v3"
+
     def clock(self):
         return self.connector.current_timestamp or time.time()
+
+    def next_nonce(self):
+        # Same monotonic generator as perp auth, across both RFQ slots.
+        from hummingbot.connector.other.derive_common_utils import get_action_nonce
+        return get_action_nonce()
 
     async def call(self, method, params, private=True):
         # Explicit aggregate limit: these RFQ paths are absent from stock HB's
@@ -104,7 +112,8 @@ class DeriveRFQTransport:
     async def send(self, legs, label, max_cost):
         leg_identity(legs)
         return await self.call("private/send_rfq", {"subaccount_id": self.connector._subacct_id,
-            "legs": legs, "label": label, "max_total_cost": str(max_cost)})
+            "legs": sorted(legs, key=lambda r: r["instrument_name"]), "label": label,
+            "partial_fill_step": "1", "max_total_cost": str(max_cost)})
 
     async def cancel(self, rfq_id):
         return await self.call("private/cancel_rfq", {"subaccount_id": self.connector._subacct_id, "rfq_id": rfq_id})
@@ -132,7 +141,9 @@ class DeriveRFQTransport:
         return await self.rows("poll_quotes", "quotes", rfq_id=rfq_id, status="open")
 
     async def executions(self, rfq_id, quote_id):
-        return await self.rows("get_quotes", "quotes", rfq_id=rfq_id, quote_id=quote_id)
+        # The taker's execution has its own quote ID. Reconcile by RFQ plus
+        # exact taker nonce/legs; filtering on the maker's ID can hide the fill.
+        return await self.rows("get_quotes", "quotes", rfq_id=rfq_id)
 
     async def instruments(self, legs):
         result = {}
@@ -164,8 +175,17 @@ class DeriveRFQTransport:
         auth = self.connector._auth
         if auth._domain != "derive_perpetual" or int(auth._subacct_id) != self.connector._subacct_id:
             raise ValueError("rfq_auth_identity_mismatch")
+        # V3 RFQ signatures must outlive RFQ creation by at least 31 minutes.
+        # A one-hour window is within the one-day ceiling and avoids the old
+        # ten-minute signature that the venue now rejects.
+        expiry = int(clock) + 3600
+        key_expiry = getattr(auth, "session_key_expiry_sec", None)
+        if key_expiry is not None:
+            expiry = min(expiry, int(key_expiry) - 60)
+        if expiry - clock < 1860 or not 10 ** 18 <= int(nonce) < 10 ** 20:
+            raise ValueError("rfq_v3_signature_window_or_nonce_invalid")
         action = SignedAction(subaccount_id=self.connector._subacct_id, owner=auth._wallet_address,
-            signer=auth.session_key_wallet.address, signature_expiry_sec=int(clock) + 600, nonce=nonce,
+            signer=auth.session_key_wallet.address, signature_expiry_sec=expiry, nonce=int(nonce),
             module_address=RFQ_MODULE, module_data=module, DOMAIN_SEPARATOR=self.constants.DOMAIN_SEPARATOR,
             ACTION_TYPEHASH=self.constants.ACTION_TYPEHASH)
         action.sign(auth._session_private_key)
@@ -203,7 +223,7 @@ def validate_instruments(instruments, legs, now):
                 or not decimal(inst["minimum_amount"]) <= amount <= decimal(inst["maximum_amount"])):
             raise ValueError("rfq_invalid_instrument_increment")
         detail = inst["option_details"]
-        # Legacy instrument expiry is Unix seconds (not milliseconds).
+        # Native instrument expiry is Unix seconds (not milliseconds).
         if detail["option_type"] not in ("C", "P") or decimal(detail["expiry"]) <= decimal(now):
             raise ValueError("rfq_expired_or_invalid_option")
         details.append(detail)

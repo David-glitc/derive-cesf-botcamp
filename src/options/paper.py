@@ -69,8 +69,8 @@ def close_quote(quote, amount, side, now):
 def live_options_status():
     return {"live_options_enabled": False, "live_execution_verified": False,
             "reason": "atomic_rfq_adapter_requires_explicit_operator_configuration",
-            "available_adapter": "derive_v2_atomic_rfq",
-            "required": ["options_enabled with rfq_v2 mode", "mainnet account and venue verification",
+            "available_adapter": "derive_v3_atomic_rfq_book",
+            "required": ["options_enabled with rfq_v3 mode", "mainnet account and venue verification",
                          "fresh native option chain", "operator launch approval"],
             "orders_submitted": 0}
 

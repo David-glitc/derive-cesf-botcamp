@@ -1,16 +1,21 @@
 {
-  "checked_at": "2026-10-02",
+  "checked_at": "2026-10-07",
   "version": "2.17.0",
   "tag": "hummingbot/hummingbot:version-2.17.0",
   "digest": "sha256:d8eb5675cdd37f84f8d132b79b932f012d755d97f21e2da3fd4fef955609079d",
   "release_notes": "https://hummingbot.org/release-notes/2.17.0/",
-  "validation": "Isolated pinned-image contract tests and mainnet-only installation; not a live trading certification",
+  "validation": "Pinned Hummingbot V2 base plus vendor/derive_v3 overlay and Flyby delegates; isolated offline contract tests, not live certification",
+  "derive_v3_overlay": {
+    "manifest": "vendor/derive_v3/manifest.json",
+    "upstream_commit": "817cf2b42822e720d6074392c90e53d43f3c6264",
+    "compatibility_version": "flyby-derive-v3-r2"
+  },
   "condor_api": "Continuous main-branch releases; no client version pin implied",
   "execution_environment": {
     "network": "mainnet",
     "connector": "derive_perpetual",
-    "api_generation": "legacy_v2",
-    "http_url": "https://api.lyra.finance",
-    "ws_url": "wss://api.lyra.finance/ws"
+    "api_generation": "v3",
+    "http_url": "https://api.derive.xyz/v3",
+    "ws_url": "wss://api.derive.xyz/v3/ws"
   }
 }

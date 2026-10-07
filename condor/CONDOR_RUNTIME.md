@@ -5,7 +5,7 @@ identity/workflow. Configure the provider/model through Condor; don't copy
 private deployment credentials into this repository.
 
 The competition identity/controller are mainnet-only: `derive_perpetual`,
-stock legacy v2 HTTP/WS endpoints. Controller validation rejects other
+reviewed Derive V3 HTTP/WS endpoints and signer on Hummingbot V2. Controller validation rejects other
 connector names and checks the runtime domain before emitting actions.
 Follow [mainnet setup](../MAINNET_SETUP.md) with the team's account; don't
 retarget an old testnet credential or loop to mainnet.

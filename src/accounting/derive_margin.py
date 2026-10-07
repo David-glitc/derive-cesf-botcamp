@@ -1,6 +1,6 @@
-"""Strict legacy get_subaccount normalization; no credentials or transport.
+"""Strict Derive V3 get_subaccount normalization; no credentials or transport.
 
-Schema: derivexyz/orderbook-stubs, typescript/private.get_subaccount.ts.
+Schema: derivexyz/derive-py, generated Subaccount and Position models.
 Initial margin is a signed net cushion, not a positive margin requirement.
 Open-order margin is signed too: available cushion = initial + order margin.
 """
@@ -63,13 +63,13 @@ def margin_snapshot(result, expected_subaccount, observed_at, *, allow_options=F
     return {"equity": equity, "available": capacity, "initial_margin": initial,
             "maintenance_margin": maintenance, "open_orders_margin": orders_margin,
             "observed_at": observed_at, "balances": balances, "positions": positions,
-            "open_orders": orders, "source": "authenticated_legacy_get_subaccount",
+            "open_orders": orders, "source": "authenticated_v3_get_subaccount",
             "margin_type": "SM"}
 
 
 def require_margin_state(connector, now, max_age=30):
     state = getattr(connector, "_flyby_account_state", None)
-    if not isinstance(state, dict) or state.get("source") != "authenticated_legacy_get_subaccount":
+    if not isinstance(state, dict) or state.get("source") != "authenticated_v3_get_subaccount":
         raise ValueError("verified_margin_unavailable")
     if not 0 <= now - state["observed_at"] <= max_age:
         raise ValueError("stale_verified_margin")

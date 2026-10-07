@@ -98,8 +98,8 @@ def options_context(snapshot: dict, now: float) -> dict:
     context = delta_context(snapshot.get("spread_plan"), now)
     context["execution_mode"] = "shadow_only"
     execution = snapshot.get("options_execution")
-    if isinstance(execution, dict) and execution.get("adapter") == "derive_v2_atomic_rfq":
-        context["execution_mode"] = "atomic_rfq_v2"
+    if isinstance(execution, dict) and execution.get("adapter") in ("derive_v3_atomic_rfq", "derive_v3_atomic_rfq_book"):
+        context["execution_mode"] = "atomic_rfq_v3"
         context["execution_phase"] = str(execution.get("phase", "unavailable"))[:32]
         context["live_execution_verified"] = False
     context["intent"] = "bounded_directional_spread_not_delta_neutral"

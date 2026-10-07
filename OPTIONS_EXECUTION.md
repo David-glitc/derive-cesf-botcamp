@@ -1,98 +1,74 @@
-# Configure atomic option spreads
+# Execute atomic option spreads on Derive V3
 
-You can now route Flyby's fee- and delta-checked call/put debit spreads through
-Derive's legacy v2 atomic RFQ interface. The code is implemented and tested offline;
-no mainnet option fill has been verified. This guide is for the competition operator.
+The selected ETH active profile enables fee- and delta-checked call/put debit
+spreads through Derive V3 RFQs. SOL options stay disabled. This is execution
+support, not verified live fills or a profitability promise.
 
-## Before you select the lane
+## Prepare the execution environment
 
-Keep trading paused until you have a dedicated mainnet SM subaccount, the pinned
-Hummingbot v2.17.0 client, the reviewed compatibility patch, and a fresh authenticated
-full margin snapshot. Provide credentials through Hummingbot's encrypted setup,
-not files in this repository. The v2 RFQ execution method requires an admin-level
-registered session key; ordinary order permission alone isn't sufficient.
-Confirm with the team that the legacy v2 API remains
-available on their competition infrastructure; this adapter doesn't fall back to v3.
+Use the reviewed Hummingbot V2 framework plus V3 connector/signing overlay in
+[mainnet setup](MAINNET_SETUP.md). The team supplies encrypted mainnet credentials,
+RFQ and instrument trade scopes, and a fresh authenticated SM/USDC subaccount.
+Ordinary perp-order permission alone does not prove RFQ permission.
 
-The $800 budget, 0.5% risk budget, signed delta/gross caps, −10% restricted mode
-and −15% hard stop remain unchanged. Venue minimums or missing liquidity can still
-produce zero trades. The IV-edge diagnostic is uncalibrated; execution support
-doesn't establish profitability.
+The selected `eth_active` sample has `options_enabled: true` and
+`options_execution_mode: rfq_v3`. Native quotes are refreshed inside the
+controller; a manual capture file is not required. Paused ETH/BTC RFQ reference
+profiles remain separate. Do not select duplicate controller variants or two
+options-enabled controllers for one account.
 
-A separate [approved ETH exposure test](reports/ETH_EXPOSURE_TEST_REPORT.md)
-raises only its exposure ceilings to 40% perp notional/gross and 75% option gross.
-It installs paused, is not selected by the default launcher, and does not change
-the baseline profiles, 20% option-delta ceiling or $4 initial loss budget.
+The shared allocation is $800, normal trade-loss budget $4, option net-delta cap
+20%, ETH option gross cap 75%, with −15% restricted / −25% hard-stop latches.
+At most two disjoint spread structures may be owned at once, alongside at most
+two perps. Account-wide exposure and costs can permit fewer positions.
 
-## Select one paused profile
+## Follow the lifecycle
 
-1. Install the repository through the existing [mainnet setup](MAINNET_SETUP.md).
-   The installer includes the two new RFQ profiles without selecting or starting them.
-2. Select `conf/controllers/conf_flyby_options_eth.yml` OR
-   `conf/controllers/conf_flyby_options_btc.yml` in the operator's launcher configuration.
-   Don't select both, or the perp and RFQ variants of the same controller ID.
-3. Keep `manual_kill_switch: true` while you verify the account, profile and native data.
-   The required option settings are `options_enabled: true` and
-   `options_execution_mode: rfq_v2`; neither changes the API generation.
-4. Supply fresh owned `data/flyby-market-ETH.json` or `data/flyby-market-BTC.json`
-   captures using [the native data setup](backtest/NATIVE_DATA.md). RFQ entry requires
-   a fee-verified, delta-verified plan no older than five seconds.
-5. Inspect `processed_data.options_execution` and the allowlisted Condor context.
-   Approve launch separately after checking the team's migration schedule and private
-   account connectivity. This repository has not unpaused or started your bot.
+Each entry or exit uses one atomic two-leg `private/execute_quote` call. Native
+instrument rules, full-sized matched quotes, fees, premium budget, fresh Greeks
+and maker-leg hash must pass before signing. Options never use perp executors.
 
-## Inspect the lifecycle
+| Phase | Behavior |
+|---|---|
+| Idle | Admit one verified disjoint structure within remaining account caps |
+| Requesting/quoting entry | Persist intent; recover by label; no blind retry |
+| Settling | Reconcile the exact taker nonce/legs and fresh paired inventory |
+| Open | Preserve ownership; allow another sleeve within remaining caps |
+| Quoting exit | Request both reversed legs; apply net-fee TP/SL/time/risk exits |
+| Halted/unknown | Block new risk; require operator reconciliation, never naked repair |
 
-Entry requests contain two matched option legs. Flyby signs and submits one
-`private/execute_quote` request only for a fresh, full, matching maker quote within
-its premium, fee and risk bounds. It verifies the native instrument rules and
-maker-leg hash before signing with Hummingbot's existing session signer.
-It never routes an option through a perpetual `PositionExecutor`.
+V3 RFQ signatures use string nanosecond nonces from the shared Hummingbot nonce
+generator. The one-hour signature is capped by key expiry and must cover the
+31-minute RFQ signing minimum. Legacy active intents are never re-signed on V3.
 
-| Phase | Entry behaviour | Recovery/exit behaviour |
-|---|---|---|
-| `requesting` | Block competing entries | Discover a lost RFQ acknowledgement by unique owned label; never blindly resend |
-| `quoting_entry` | Accept only the planned full spread | Cancel on stale plan or failed current risk/signal gate |
-| `settling` | Block all new entries | Require the owned settled transaction and exact full authenticated inventory |
-| `open` / `quoting_exit` | Block all new entries | Request both reversed legs; evaluate +30% TP / −18% SL after fees, six-hour hold, expiry, signal failure or hard stop |
-| `cancelling` | Block new entries | Await terminal RFQ status; a cancel acknowledgement isn't a flat-position proof |
-| `halted` | Block new entries | Require operator reconciliation; don't place a naked repair leg |
+A filled taker quote and exact fresh authenticated inventory confirm sequencer
+execution. Batch status and optional L1 hash are separate settlement evidence;
+Flyby does not wait for an L1 batch to permit a protective paired exit.
+Errored batches halt for reconciliation. Maker and taker quote IDs can differ;
+recovery uses the owned RFQ plus nonce and exact legs, not the maker ID alone.
 
-`orders_submitted` counts identified exchange acknowledgements;
-`execution_attempts` counts durable execution intents. If an acknowledgement is
-lost, `submission_count_incomplete` remains true until read-only reconciliation
-finds that owned request. A prepared/signing-failed intent isn't a confirmed order.
+TP is +30% and SL −18% of paid debit plus entry fee, with six-hour maximum hold
+and expiry/signal/risk exits. Exit quotes include an exit-fee reserve. An exit
+trigger is not a guaranteed fill or maximum-loss guarantee.
 
-Quotes may be absent, expire or fail venue margin/fee checks. Exit triggers aren't
-guaranteed fills or guaranteed loss ceilings. Failed or ambiguous settlement doesn't
-authorize a retry, journal deletion, namespace change or risk-cap increase.
+## Preserve state and verify
 
-## Preserve recovery state
+Persist the shared risk checkpoint and RFQ journals:
+`flyby-rfq-flyby-competition.json`, its `-slot-2.json` journal, the book ownership
+journal and lock files. Do not delete them, change ownership IDs or reuse one
+state directory for another account. Signatures and session keys are not journaled.
 
-Persist `data/flyby-rfq-flyby-competition.json` and its lock alongside the existing
-risk checkpoint when the bot restarts. Each write intent reaches disk before its
-request. Keep the same account and controller owner; don't share the state directory
-between different accounts. The journal stores transaction identifiers, paired trade
-P&L and fees, but no private key or signed payload. Its bounded size fails closed
-instead of silently discarding history.
-
-The default four Condor samples remain paused and shadow-only. The Condor agent
-observes the controller's RFQ state; it doesn't recreate signals, sign requests,
-submit private orders or bypass the operator's launch gate.
-
-## Verify without sending orders
-
-From the repository root, run:
+Run offline fixtures from the repository root:
 
 ```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q -p no:cacheprovider tests/test_options_rfq.py
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q -p no:cacheprovider tests/test_options_rfq.py tests/test_v3_upgrade.py
 ```
 
-The lifecycle tests use a scripted transport. The pinned-container tests in
-`tests/test_options_rfq_hummingbot.py` exercise the actual RFQ serializer, signer,
-controller and compatibility delegates with network access disabled. Neither is
-evidence of an accepted mainnet RFQ or a live option fill.
+The pinned image tests additionally exercise real Hummingbot signing/serialization
+with network disabled. Neither fixture tests nor a source sync prove mainnet
+orders. Confirm actual authenticated state and exchange fills in the team's
+environment using [the handoff](condor/SYNC_HANDOFF.md).
 
-Protocol references: [legacy RFQ schema](https://github.com/derivexyz/orderbook-stubs/blob/db6b172d5e10553738c74ccab775ef2e7258e955/typescript/private.execute_quote.ts),
-[signing layout](https://github.com/derivexyz/v2-action-signing-python/blob/d1914d61985e33559244da242892c7255b6fd0ca/derive_action_signing/module_data/rfq.py),
-and [atomic RFQ contract](https://github.com/derivexyz/v2-matching/blob/f6c20f46e346151e0969777c5119c92ec21b3be8/src/modules/RfqModule.sol).
+Protocol references: [V3 migration](https://docs.derive.xyz/migrating/breaking-changes.md),
+[RFQ trading](https://docs.derive.xyz/trading/rfq.md) and
+[official Python SDK](https://github.com/derivexyz/derive-py).

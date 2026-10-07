@@ -44,7 +44,7 @@ A deterministic Hummingbot V2 controller owns signals, sizing and protective exi
 
 For ETH/BTC, Flyby constructs bullish call debit spreads or bearish put debit spreads using two contracts with the same expiry. It checks executable quotes, fees, contract minimums and signed delta exposure. Bought/sold absolute-delta targets are approximately 0.50/0.25; eligible expiries are two to five days, preferably three.
 
-The opt-in legacy v2 RFQ adapter signs one full spread transaction rather than placing two independent option orders. It persists each write intent before submission and requires a settled owned transaction plus exact authenticated positions before recording an entry or close. Lost acknowledgements trigger read-only reconciliation, not blind retries. Unmatched inventory blocks new entries and requires operator review.
+The opt-in V3 RFQ adapter signs one full spread transaction rather than placing two independent option orders. It persists each write intent before submission and requires an identified filled taker quote plus exact fresh authenticated positions, recording L1 settlement separately before recording an entry or close. Lost acknowledgements trigger read-only reconciliation, not blind retries. Unmatched inventory blocks new entries and requires operator review.
 
 Paired exits evaluate executable spread credit after fees, targeting +30% profit, −18% loss and a maximum six-hour hold. Signal, delta-cap, hard-stop or expiry conditions can request earlier exits. These are software triggers, not guaranteed fills. Offline tests reproduced a fee-cap rejection that leaves both legs awaiting reconciliation when required exit fees rise. Live options remain blocked until that recovery path and private-account execution are verified. Default samples remain shadow-only; separate ETH/BTC RFQ profiles install paused.
 
@@ -64,7 +64,7 @@ Samples ship paused. Mainnet private-account reconciliation, an authenticated pr
 
 | Item | Current scope |
 |---|---|
-| Execution venue | Derive mainnet through Hummingbot's legacy v2 perpetual connector |
+| Execution venue | Derive mainnet through Hummingbot's V3 perpetual connector |
 | Primary perp profiles | ETH-USDC and BTC-USDC |
 | Operator-selected fallback profiles | SOL-USDC and HYPE-USDC |
 | Default signal data | Matching Binance perpetual proxy candles: ETH-USDT, BTC-USDT, SOL-USDT or HYPE-USDT, on five-minute completed bars |

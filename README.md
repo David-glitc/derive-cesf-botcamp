@@ -1,8 +1,8 @@
 # Flyby — Hummingbot V2 + Condor
 
 Run one deterministic Flyby policy through Hummingbot's Derive perpetual
-mainnet adapter. ETH/BTC are primary candidates; SOL/HYPE are fallback profiles.
-The team chooses the enabled markets and account universe.
+mainnet V3 adapter. The selected active lane is ETH+SOL; BTC/HYPE remain
+unselected paused reference profiles. The team chooses its account universe.
 
 Fixed submission identity: `flyby-baseline-dd15-dd25-v1`. Condor discovers agent
 `flyby` and explicit loop `flyby.flyby_operator`; see the
@@ -17,7 +17,8 @@ records discovery/tick/install evidence and the remaining production gates.
 checks pass; deployed exchange fills for this package remain unverified.
 Contract tests pass in Hummingbot v2.17.0, but stress replay remains negative
 after risk mitigations.
-Default profiles keep option spreads in shadow mode. A separately configured
+Paused baseline samples keep option spreads in shadow mode; selected ETH active
+enables two-slot atomic spreads, within aggregate caps. The
 [atomic RFQ lane](OPTIONS_EXECUTION.md) implements entry, paired exits and durable
 recovery; mainnet option fills remain unverified. Read the
 [stress report](reports/STRESS_REPORT.md) and [launch gates](COMPETITION_READINESS.md).
@@ -90,9 +91,10 @@ as described in the [release notes](https://hummingbot.org/release-notes/2.17.0/
 
 Use [mainnet setup](MAINNET_SETUP.md) for the team handoff. The competition
 runtime accepts only `derive_perpetual` and rejects testnet/paper overrides.
-The stock connector uses the legacy v2 API at `https://api.lyra.finance`;
-the options public-data harness uses v3 separately. This is not a v3 trading
-migration. The installer checks endpoints and paused profiles before writes.
+The selected connector uses Derive V3 at `https://api.derive.xyz/v3` with the
+reviewed signing/schema overlay on Hummingbot V2. The active ETH profile enables
+atomic options; SOL options stay disabled. The shared account limit is two
+perps and two disjoint multi-leg spreads, within existing loss/exposure caps.
 
 Run this inside your Hummingbot environment with this repository at `/repo`:
 

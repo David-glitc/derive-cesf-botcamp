@@ -13,7 +13,7 @@ from src.options.paper import PaperOptions
 def verify_raw(rows):
     records = {}
     for row in rows:
-        if (row.get("network") != "mainnet" or row.get("api_generation") != "legacy_v2"
+        if (row.get("network") != "mainnet" or row.get("api_generation") != "v3"
                 or row.get("schema") != 1 or row.get("method") not in DerivePublic.SOURCES
                 or digest({k: v for k, v in row.items() if k != "id"}) != row.get("id")
                 or not 0 <= number(row["sent_at"]) <= number(row["received_at"])):

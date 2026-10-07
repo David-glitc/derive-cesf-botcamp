@@ -50,9 +50,9 @@ class Provider:
             quantize_order_amount=lambda pair, amount: amount.quantize(Decimal(".001"), rounding="ROUND_DOWN"),
             trading_rules={"ETH-USDC": SimpleNamespace(min_order_size=Decimal(".001"), min_notional_size=Decimal("1"),
                 min_base_amount_increment=Decimal(".001"), min_price_increment=Decimal(".01"), max_order_size=Decimal("Infinity"))},
-            FLYBY_COMPATIBILITY_VERSION="flyby-derive-2.17.0-r1",
+            FLYBY_COMPATIBILITY_VERSION="flyby-derive-v3-r2",
             _flyby_account_state={"equity": Decimal("800"), "available": Decimal("800"), "open_orders": [],
-                "source": "authenticated_legacy_get_subaccount", "observed_at": self.now})
+                "source": "authenticated_v3_get_subaccount", "observed_at": self.now})
 
     def time(self): return self.now
     def get_connector(self, name): return self.connector
@@ -193,7 +193,7 @@ def test_mainnet_preflight_cli_in_actual_hummingbot_environment():
     verdict = json.loads(result.stdout)
     assert verdict["network"] == "mainnet"
     assert verdict["connector"] == "derive_perpetual"
-    assert verdict["api_generation"] == "legacy_v2"
+    assert verdict["api_generation"] == "v3"
     assert verdict["install_profiles_paused"] is True
     assert verdict["account_verified"] is False
     assert verdict["live_execution_verified"] is False
@@ -302,11 +302,36 @@ def test_owned_position_is_not_automatically_closed_as_unknown(tmp_path):
     provider.connector.account_positions["ETH"] = SimpleNamespace(trading_pair="ETH-USDC", amount=.025,
                                                                  entry_price=3000, unrealized_pnl=1)
     account = ctl._account(provider.connector, provider.now)
-    assert account["reconciled"] and not account["entry_allowed"]
+    assert account["reconciled"] and account["entry_allowed"] and account["perp_positions"] == 1
     ctl.processed_data.update(signal=1, halt=False)
     assert ctl.stop_actions_proposal() == []
     provider.connector.account_positions["ETH"].amount = .10
     assert not ctl._account(provider.connector, provider.now)["reconciled"]
+
+
+def test_selected_two_perp_profiles_share_account_slots(tmp_path):
+    from copy import deepcopy
+    first, provider = controller(tmp_path)
+    first.config = DeriveCesfLongVolConfig(**{**first.config.model_dump(),
+        "max_perp_positions": 2, "max_option_spreads": 2})
+    config = first.get_executor_config(TradeType.BUY, Decimal("3000"), Decimal(".02"))
+    first.executors_info = [executor_info(config)]
+    provider.connector.account_positions["ETH"] = SimpleNamespace(
+        trading_pair="ETH-USDC", amount=Decimal(".02"), entry_price=Decimal("3000"), unrealized_pnl=0)
+    raw = yaml.safe_load((ROOT / "conf/controllers/conf_flyby_sol_active.yml").read_text())
+    second = DeriveCesfLongVolController(DeriveCesfLongVolConfig(**raw), provider, asyncio.Queue())
+    second._risk_path = first._risk_path
+    second._last_book_time = provider.now
+    second.processed_data = deepcopy(first.processed_data)
+    second.processed_data.update(signal=1, halt=False, confidence=.8, atr_pct=.004)
+    provider.connector.trading_rules["SOL-USDC"] = provider.connector.trading_rules["ETH-USDC"]
+    provider.connector._instrument_ticker.append({**provider.connector._instrument_ticker[0], "instrument_name": "SOL-PERP"})
+    assert second._account(provider.connector, provider.now)["perp_positions"] == 1
+    actions = second.create_actions_proposal()
+    assert len(actions) == 1 and actions[0].executor_config.trading_pair == "SOL-USDC"
+    second.executors_info = [executor_info(actions[0].executor_config, id="executor-sol")]
+    assert second._account(provider.connector, provider.now)["perp_positions"] == 2
+    assert second.create_actions_proposal() == []
 
 
 @pytest.mark.parametrize("fault,reason", [("private", "stale_user_stream"), ("gap", "candle_gap"),
@@ -440,7 +465,7 @@ def test_stock_connector_and_missing_margin_cannot_authorize_entries(tmp_path):
     asyncio.run(ctl.update_processed_data())
     assert ctl.processed_data["reason"] == "reviewed_connector_compatibility_required"
     assert ctl.create_actions_proposal() == []
-    provider.connector.FLYBY_COMPATIBILITY_VERSION = "flyby-derive-2.17.0-r1"
+    provider.connector.FLYBY_COMPATIBILITY_VERSION = "flyby-derive-v3-r2"
     provider.connector._flyby_account_state = None
     provider.book.last_diff_uid += 1
     asyncio.run(ctl.update_processed_data())

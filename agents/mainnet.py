@@ -1,13 +1,13 @@
 """Non-trading network contract for the stock Hummingbot competition lane."""
 
 MAINNET_CONNECTOR = "derive_perpetual"
-MAINNET_HTTP_URL = "https://api.lyra.finance"
-MAINNET_WS_URL = "wss://api.lyra.finance/ws"
+MAINNET_HTTP_URL = "https://api.derive.xyz/v3"
+MAINNET_WS_URL = "wss://api.derive.xyz/v3/ws"
 
 
 def execution_environment():
     return {"network": "mainnet", "connector": MAINNET_CONNECTOR,
-            "api_generation": "legacy_v2", "http_url": MAINNET_HTTP_URL,
+            "api_generation": "v3", "http_url": MAINNET_HTTP_URL,
             "ws_url": MAINNET_WS_URL}
 
 

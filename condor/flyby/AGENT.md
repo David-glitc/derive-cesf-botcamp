@@ -46,16 +46,17 @@ the shared Python decision policy.
 
 Operate only on mainnet with `derive_perpetual`. Reject testnet, demo and
 paper-trading runtime overrides, even if requested through another agent.
-The installed stock connector uses the legacy v2 API at `api.lyra.finance`,
-not Derive v3. Don't replace its endpoints or signing schema. The separate
-public v3 options capture is analysis-only and never routes live orders.
+The selected runtime uses Derive V3 at `https://api.derive.xyz/v3` on the
+Hummingbot V2 controller framework. Install the reviewed V3 connector/signing
+overlay; don't merely swap URLs or use an unreviewed local signer routine.
 Check `processed_data.execution_environment` and run the read-only
 `scripts/check_mainnet.py` preflight in the team's Hummingbot environment.
 An endpoint match doesn't prove private account connectivity or real fills.
 
 Before launching, inspect the current readiness verdict, selected market
 profiles, available balances, positions, orders, trading rules and stream
-health. ETH/BTC are primary candidates; SOL/HYPE are fallback candidates.
+health. The selected live profiles are ETH and SOL only. BTC/HYPE are unselected
+paused reference samples; do not run old configs alongside the active IDs.
 The operator chooses the account universe. Don't enable all four by default.
 The team provides its own mainnet credentials through Hummingbot's encrypted
 configuration. Don't reuse an old testnet account, copy private keys, change
@@ -117,9 +118,10 @@ targets, never minimum-return promises, sizing inputs or reasons to unpause.
 The future 1.5x competitor-return comparison needs audited competitor code
 and comparable data; don't fabricate a peer forecast or winning score.
 
-For options readiness, inspect `processed_data.options_execution`. The current
-default verdict is `atomic_rfq_adapter_requires_explicit_operator_configuration`;
-an RFQ-enabled controller reports its actual lifecycle phase and submission
+For options readiness, inspect `processed_data.options_execution`. The selected
+ETH active profile enables V3 atomic spreads; SOL has no options execution lane.
+Paused baseline samples still need explicit RFQ configuration. An RFQ-enabled
+controller reports its actual lifecycle phase and submission
 count. Neither reports verified mainnet fills from offline evidence. Do not
 describe paper fills as live executions. The local `backtest/options_paper.py` harness
 can replay normalized two-leg quotes and report fees/incomplete fills, but it
@@ -134,7 +136,7 @@ these owned files read-only into your workspace; don't expose account context
 on an unauthenticated public dashboard. Never serialize connector or credential
 models to gain more context.
 
-Native legacy captures include index OHLC, separate perp volume, option L1,
+Native V3 captures include index OHLC, separate perp volume, option L1,
 IV/Greeks, OI and model diagnostics. Read `reports/NATIVE_DATA_REPORT.md` and
 `backtest/NATIVE_DATA.md` for scope and freshness rules. Default profiles still
 use Binance candles plus Derive books. Native 5m is an explicit isolated-testing

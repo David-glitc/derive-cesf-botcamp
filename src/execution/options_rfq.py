@@ -103,14 +103,15 @@ def exposure_requires_exit(account, plan, *, exposure_profile=BASELINE_EXPOSURE)
     try:
         limits = exposure_limits(exposure_profile, plan.get("underlying"))
         net, gross = Decimal(0), Decimal(0)
-        for row in account["positions"]:
+        for row in account.get("_option_exposure_positions", account["positions"]):
             amount = decimal(row["amount"])
             if not amount:
                 continue
             delta, index = decimal(row["delta"]), decimal(row["index_price"])
             if not -1 <= delta <= 1 or index <= 0:
                 return True
-            net += amount * delta * index
+            if row["instrument_name"].startswith(plan["underlying"] + "-"):
+                net += amount * delta * index
             gross += abs(amount) * index
         return (abs(net) > min(decimal(plan["net_cap_quote"]), decimal(account["equity"]) * decimal(limits["option_net"]))
                 or gross > min(decimal(plan["gross_cap_quote"]), decimal(account["equity"]) * decimal(limits["option_gross"])))
@@ -132,7 +133,7 @@ class OptionsRFQ:
 
     def status(self):
         s = self.journal.state
-        return {"adapter": "derive_v2_atomic_rfq", "live_options_enabled": True,
+        return {"adapter": "derive_v3_atomic_rfq", "live_options_enabled": True,
                 "exposure_profile": self.exposure_profile,
                 "live_execution_verified": False, "phase": s["phase"], "reason": s.get("reason") or self.last_error,
                 "orders_submitted": s.get("execution_acknowledgements", 0),
@@ -158,6 +159,10 @@ class OptionsRFQ:
                 return
             try:
                 self.journal.state = self.journal.load()
+                if (getattr(self.transport, "api_generation", None) == "v3" and self.busy
+                        and self.journal.state.get("api_generation") != "v3"):
+                    self.last_error = "legacy_rfq_requires_operator_reconciliation"
+                    return  # preserve the old intent; never re-sign/replay it on V3
                 await self._tick(now, plan, decimal(budget), allow_entry, force_exit, consume_entry, entry_budget, exit_required)
                 self.last_error = None
             except Exception as exc:
@@ -195,6 +200,7 @@ class OptionsRFQ:
             if consume_entry is None or not consume_entry(account, now):
                 return
             self.journal.save(plan=plan, budget=str(budget), entry_debit=None, entry_fee=None,
+                              api_generation=getattr(self.transport, "api_generation", "offline"),
                               opened_at=None, force_exit=False, realized_pnl=None)
             return await self._request(now, "entry")
         if phase == "settling":
@@ -258,7 +264,8 @@ class OptionsRFQ:
                     if now - s["requested_at"] >= 20:
                         return await self._cancel()
                     return
-            nonce = max(int(now * 1000) * 1000, s["nonce"] + 1)
+            generator = getattr(self.transport, "next_nonce", None)
+            nonce = max(generator() if generator else int(decimal(now) * 10 ** 9), int(s["nonce"]) + 1)
             # Bad native metadata/hash/signature fails BEFORE any write intent:
             # no private request exists to recover. Signed payload stays in memory.
             prepared = await self.transport.prepare(quote, s["max_fee"], nonce, s["label"], now, s["plan"], s["intent"])
@@ -285,8 +292,8 @@ class OptionsRFQ:
             # Result is only an acknowledgement; reconciliation below is the
             # sole path to recording an opened or closed position.
             ack = await self.transport.submit(prepared)
-            if (ack.get("subaccount_id") == self.subaccount and ack.get("quote_id") == quote["quote_id"]
-                    and ack.get("rfq_id") == s["rfq_id"] and ack.get("nonce") == nonce):
+            if (ack.get("subaccount_id") == self.subaccount
+                    and ack.get("rfq_id") == s["rfq_id"] and str(ack.get("nonce")) == str(nonce)):
                 self._acknowledge()
             return
         if now >= min(s["requested_at"] + 20, float(rfq["valid_until"]) / 1000):
@@ -303,6 +310,13 @@ class OptionsRFQ:
             raise ValueError("rfq_unverified_plan")
         nums = {k: decimal(p[k]) for k in ("amount", "debit", "max_loss", "max_payoff", "round_trip_fees",
                 "buy_limit", "sell_limit", "net_delta_quote", "net_cap_quote", "gross_reference_quote", "gross_cap_quote")}
+        if not 0 <= decimal(p.get("committed_gross_quote", 0)) <= nums["gross_reference_quote"]:
+            raise ValueError("rfq_invalid_committed_gross")
+        if (abs(nums["net_delta_quote"] + decimal(account.get("_rfq_other_net", 0))) >
+                min(nums["net_cap_quote"], decimal(account["equity"]) * decimal(limits["option_net"])) or
+                nums["gross_reference_quote"] - decimal(p.get("committed_gross_quote", 0)) + decimal(account.get("_rfq_other_gross", 0)) >
+                min(nums["gross_cap_quote"], decimal(account["equity"]) * decimal(limits["option_gross"]))):
+            raise ValueError("rfq_plan_exceeds_configured_exposure")
         # A declared plan cap isn't permission to widen configured current-equity
         # limits. Legacy baseline journals retain their narrower stored caps.
         if (abs(nums["net_delta_quote"]) > min(nums["net_cap_quote"], decimal(account["equity"]) * decimal(limits["option_net"]))
@@ -353,6 +367,7 @@ class OptionsRFQ:
         s = self.journal.state
         if (quote["rfq_id"] != s["rfq_id"] or quote["status"] != "open" or quote["direction"] != "sell"
                 or quote["liquidity_role"] != "maker" or quote.get("tx_status") is not None
+                or quote.get("batch_status") is not None
                 or decimal(quote.get("fill_pct", "1")) != 1
                 or not 0 <= now - quote["creation_timestamp"] / 1000 <= 5
                 or not 0 <= now - quote["last_update_timestamp"] / 1000 <= 5
@@ -383,12 +398,12 @@ class OptionsRFQ:
     async def _settle(self, now, account, positions):
         s = self.journal.state
         rows = await self.transport.executions(s["rfq_id"], s["quote_id"])
-        matches = [r for r in rows if r.get("liquidity_role") == "taker" and r.get("nonce") == s["nonce"]]
+        matches = [r for r in rows if r.get("liquidity_role") == "taker" and str(r.get("nonce")) == str(s["nonce"])]
         if len(matches) != 1:
             return  # no acknowledgement is NOT proof of rejection; never replay
         row = matches[0]
         if (row["subaccount_id"] != self.subaccount or row["rfq_id"] != s["rfq_id"]
-                or row["quote_id"] != s["quote_id"] or row["direction"] != "buy"
+                or row["direction"] != "buy"
                 or leg_identity(row["legs"]) != leg_identity(s["execution_legs"])
                 or quote_cost(row["legs"]) != decimal(s["execution_cost"])
                 or row["legs_hash"].lower() != s["execution_hash"].lower()
@@ -397,14 +412,18 @@ class OptionsRFQ:
         self._acknowledge()
         target = expected_positions(s["plan"]) if s["intent"] == "entry" else {}
         before = {} if s["intent"] == "entry" else expected_positions(s["plan"])
-        if row["tx_status"] in ("requested", "pending", None):
+        v3 = getattr(self.transport, "api_generation", None) == "v3"
+        batch = row.get("batch_status")
+        if v3 and (batch not in (None, "Batching", "Executing", "Da", "Proving", "Settling", "Settled")):
+            return self.halt("rfq_batch_failed_requires_operator_reconciliation")
+        if (not v3 and row["tx_status"] in ("requested", "pending", None)) or (v3 and positions != target):
             if positions not in (target, before):
                 self.halt("rfq_unmatched_inventory_during_settlement")
             return
-        if row["tx_status"] in ("reverted", "ignored", "timed_out"):
+        if not v3 and row["tx_status"] in ("reverted", "ignored", "timed_out"):
             # A terminal backend status alone is insufficient to assume flat.
             return self.halt("rfq_execution_failed_requires_operator_reconciliation")
-        if (row["tx_status"] != "settled" or row["status"] != "filled" or not row["tx_hash"]
+        if ((not v3 and (row["tx_status"] != "settled" or not row["tx_hash"])) or row["status"] != "filled"
                 or account["observed_at"] < row["last_update_timestamp"] / 1000):
             return
         if positions != target:
@@ -412,14 +431,20 @@ class OptionsRFQ:
         fee = decimal(row["fee"])
         if not 0 <= fee <= decimal(s["max_fee"]):
             return self.halt("rfq_settled_fee_exceeds_bound")
+        # V3 execution is atomic at the sequencer; L1 batches settle later.
+        # Filled taker quote + fresh exact inventory permits protective exits
+        # without pretending an absent L1 transaction has already settled.
+        reference = row.get("tx_hash") or "rfq:" + row["quote_id"] + ":" + str(row["nonce"])
         if s["intent"] == "entry":
             self.journal.save(phase="open", entry_debit=s["execution_cost"], entry_fee=str(fee),
                               opened_at=row["last_update_timestamp"] / 1000, next_quote_at=now,
-                              entry_tx=row["tx_hash"])
+                              entry_tx=reference, batch_status=batch,
+                              settlement_confirmation="matched_inventory" if v3 else "chain_settled")
         else:
             pnl = -decimal(s["execution_cost"]) - fee - decimal(s["entry_debit"]) - decimal(s["entry_fee"])
             trade = {"opened_at": s["opened_at"], "closed_at": row["last_update_timestamp"] / 1000,
-                     "entry_tx": s["entry_tx"], "exit_tx": row["tx_hash"], "net_pnl": str(pnl),
+                     "entry_tx": s["entry_tx"], "exit_tx": reference, "net_pnl": str(pnl),
+                     "batch_status": batch, "l1_settled": batch == "Settled" if v3 else True,
                      "entry_debit": s["entry_debit"], "exit_credit": str(-decimal(s["execution_cost"])),
                      "fees": str(fee + decimal(s["entry_fee"])), "buy": s["plan"]["buy"],
                      "sell": s["plan"]["sell"], "amount": str(s["plan"]["amount"])}

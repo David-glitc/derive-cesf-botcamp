@@ -24,7 +24,10 @@ option_gross_fraction: 0.75
 max_slippage: 0.0015
 max_basis: 0.03
 condor_active: false
-options_enabled: false
+options_enabled: true
+options_execution_mode: rfq_v3
+max_perp_positions: 2
+max_option_spreads: 2
 options_signal_enabled: true
 option_buy_moneyness: any
 option_buy_delta_target: 0.50

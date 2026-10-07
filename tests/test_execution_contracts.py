@@ -6,7 +6,7 @@ from src.execution.contracts import AccountMirror, close_intent
 
 
 def account(**changes):
-    return {"network": "mainnet", "api_generation": "legacy_v2", "received_at": 100,
+    return {"network": "mainnet", "api_generation": "v3", "received_at": 100,
             "equity": 800, "available_margin": 600, "margin_source": "verified_free_margin",
             "realized_pnl": 0, "positions": {"ETH-PERP": ".01"}, "open_order_ids": [], **changes}
 

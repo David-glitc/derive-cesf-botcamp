@@ -3,7 +3,7 @@ profile_id: flyby-baseline-dd15-dd25-v1
 agent_slug: flyby
 loop_id: flyby.flyby_operator
 controller_name: derive_cesf_long_vol
-execution_environment: mainnet_legacy_v2
+execution_environment: mainnet_v3
 markets: [ETH, BTC, SOL, HYPE]
 restricted_drawdown: -0.15
 hard_stop_drawdown: -0.25

@@ -31,7 +31,7 @@ class AccountMirror:
     def replace(self, observation, now):
         required = {"network", "api_generation", "received_at", "equity", "available_margin", "margin_source",
                     "realized_pnl", "positions", "open_order_ids"}
-        if not required.issubset(observation) or observation["network"] != "mainnet" or observation["api_generation"] != "legacy_v2":
+        if not required.issubset(observation) or observation["network"] != "mainnet" or observation["api_generation"] != "v3":
             raise ValueError("authoritative account provenance mismatch")
         if observation["margin_source"] != "verified_free_margin":
             raise ValueError("collateral balance is not verified free margin")

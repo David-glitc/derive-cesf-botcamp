@@ -96,7 +96,7 @@ def controller_context(controller, now):
     market_path = Path("data") / f"flyby-market-{ccy}.json"
     market = read_market(market_path, now, ccy)
     context = {"schema": 1, "kind": "flyby_controller_context", "controller_id": config.id,
-               "time": now, "network": "mainnet", "api_generation": "legacy_v2",
+               "time": now, "network": "mainnet", "api_generation": "v3",
                "paused": bool(config.manual_kill_switch), "pair": config.trading_pair,
                "decision_updated_at": scalar(data.get("updated_at")),
                "decision": {"signal": scalar(data.get("signal")), "halt": bool(data.get("halt", True)),
@@ -133,13 +133,13 @@ def controller_context(controller, now):
                                       "in_distribution": alpha.get("in_distribution") is True,
                                       "confidence_is_probability": False, "live_authorized": False}
     execution = data.get("options_execution")
-    if isinstance(execution, dict) and execution.get("adapter") == "derive_v2_atomic_rfq":
-        context["options_execution"] = {"adapter": "derive_v2_atomic_rfq",
+    if isinstance(execution, dict) and execution.get("adapter") in ("derive_v3_atomic_rfq", "derive_v3_atomic_rfq_book"):
+        context["options_execution"] = {"adapter": execution["adapter"],
             "enabled": getattr(config, "options_enabled", False) is True,
             "phase": str(execution.get("phase", "unavailable"))[:32],
             "reason": str(execution.get("reason", ""))[:80], "live_execution_verified": False,
             "submission_count_incomplete": execution.get("submission_count_incomplete") is True,
-            **fields(execution, ("orders_submitted", "execution_attempts", "closed_spreads", "entry_debit", "entry_fee", "realized_pnl"))}
+            **fields(execution, ("orders_submitted", "execution_attempts", "closed_spreads", "entry_debit", "entry_fee", "realized_pnl", "max_spreads", "open_spreads"))}
     connector = None
     try:
         connector = controller._mainnet_connector()
@@ -169,7 +169,7 @@ def controller_context(controller, now):
             raise ValueError("incomplete_runtime_account_inventory")
         context["risk"].update(venue_equity=scalar(account["equity"]),
                                available=scalar(account["available"]), margin_age=scalar(now - account["observed_at"]),
-                               margin_source="authenticated_legacy_get_subaccount", margin_verified=True)
+                               margin_source="authenticated_v3_get_subaccount", margin_verified=True)
         context["portfolio"] = {**fields(account, ("equity", "available", "initial_margin", "maintenance_margin")),
                                 "observed_at": scalar(account["observed_at"]), "source": account["source"],
                                 "position_count": len(account["positions"]), "open_order_count": len(account["open_orders"])}

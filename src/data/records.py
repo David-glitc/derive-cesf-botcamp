@@ -1,4 +1,4 @@
-"""Explicit legacy schemas: slim bulk tickers, long single tickers, native bars."""
+"""Derive V3 slim tickers and native bars, with explicit provenance."""
 import hashlib
 import json
 import math
@@ -21,7 +21,7 @@ def digest(value):
 def public_record(method, data, sent, received, params=None):
     if not 0 <= sent <= received:
         raise ValueError("invalid observation times")
-    record = {"schema": 1, "network": "mainnet", "api_generation": "legacy_v2",
+    record = {"schema": 1, "network": "mainnet", "api_generation": "v3",
               "method": method, "sent_at": sent, "received_at": received, "data": data}
     if params is not None:
         record["params"] = params
@@ -29,14 +29,15 @@ def public_record(method, data, sent, received, params=None):
 
 
 def normalize_perp(raw, ccy, now):
-    if raw.get("instrument_name") != f"{ccy}-PERP" or raw.get("instrument_type") != "perp":
+    # V3 single ticker no longer echoes the name/type: bind to the requested
+    # instrument, never infer it from a response's ordering.
+    if raw.get("instrument_name", f"{ccy}-PERP") != f"{ccy}-PERP" or raw.get("instrument_type", "perp") != "perp":
         raise ValueError("unexpected perp instrument")
-    result = {"instrument": raw["instrument_name"],
-              "timestamp": number(raw["timestamp"]) / 1000,
-              "index": number(raw["index_price"]), "mark": number(raw["mark_price"]),
-              "bid": number(raw["best_bid_price"]), "ask": number(raw["best_ask_price"]),
-              "bid_size": number(raw["best_bid_amount"]), "ask_size": number(raw["best_ask_amount"]),
-              "funding_rate": number((raw.get("perp_details") or {}).get("funding_rate"), optional=True)}
+    result = {"instrument": f"{ccy}-PERP", "timestamp": number(raw["t"]) / 1000,
+              "index": number(raw["I"]), "mark": number(raw["M"]),
+              "bid": number(raw["b"]), "ask": number(raw["a"]),
+              "bid_size": number(raw["B"]), "ask_size": number(raw["A"]),
+              "funding_rate": number(raw.get("f"), optional=True)}
     if result["index"] <= 0 or result["mark"] <= 0:
         raise ValueError("invalid native price")
     if min(result[k] for k in ("bid", "ask", "bid_size", "ask_size", "timestamp")) < 0:
@@ -131,7 +132,7 @@ def validate_snapshot(snapshot, now, ccy):
     if not isinstance(snapshot, dict):
         raise ValueError("market context must be an object")
     if (snapshot.get("schema") != 1 or snapshot.get("kind") != "derive_market_context"
-            or snapshot.get("network") != "mainnet" or snapshot.get("api_generation") != "legacy_v2"
+            or snapshot.get("network") != "mainnet" or snapshot.get("api_generation") != "v3"
             or snapshot.get("ccy") != ccy):
         raise ValueError("market context provenance mismatch")
     if digest({k: v for k, v in snapshot.items() if k != "id"}) != snapshot.get("id"):

@@ -2,7 +2,7 @@
 
 The team runs the V2 controller and its shared Condor policy—not the archived
 v3 testnet runner. The controller exists in one place, inside the Condor agent folder.
-The competition runtime is mainnet-only using the stock Hummingbot legacy v2
+The competition runtime is mainnet-only using the reviewed Hummingbot Derive V3
 Derive connector, not a Derive v3 trading client.
 
 Required runtime files:

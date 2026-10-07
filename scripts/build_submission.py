@@ -20,11 +20,12 @@ ROOT_FILES = ("README.md", "strategy.md", "FLYBY_spec.md", "MAINNET_SETUP.md", "
               "hummingbot-version.json", "pyproject.toml", "requirements.txt")
 SCRIPTS = ("install_hummingbot.sh", "check_mainnet.py", "hummingbot_compat.py", "test_hummingbot.sh",
            "check_condor_package.py", "install_condor.py", "verify_condor_runtime.py",
-           "build_submission.py", "inspect_market_rules.py",
+           "build_submission.py", "inspect_market_rules.py", "install_derive_v3.py", "upgrade_condor.py", "check_derive_v3_public.py",
            "prepare_competition_profile.py",
            "prepare_observation_profile.py",
            "capture_derive_public.py", "validate_flyby.py")
 TREES = {"agents": {".py"}, "src": {".py"}, "conf": {".yml"},
+         "vendor/derive_v3": {".py", ".json"},
          "condor": {".md", ".py", ".yml"}, "tests": {".py"}, "verification": {".md", ".py"},
          "reports": {".md"}, "backtest": {".md", ".py"}}
 SECRET_PATTERNS = (
@@ -38,6 +39,7 @@ SECRET_PATTERNS = (
 def selected_files(root=ROOT):
     selected = {root / name for name in ROOT_FILES}
     selected.update(root / "scripts" / name for name in SCRIPTS)
+    selected.add(root / "vendor/derive_v3/LICENSE")
     for directory, suffixes in TREES.items():
         selected.update(p for p in (root / directory).rglob("*") if p.suffix in suffixes and "__pycache__" not in p.parts)
     for path in selected:

@@ -41,7 +41,7 @@ def exact(actual, expected):
 def validate_fixed_profile(directory):
     profile = yaml.safe_load((directory / "PROFILE.yml").read_text())
     identity = {"profile_id": PROFILE_ID, "agent_slug": "flyby", "loop_id": LOOP_ID,
-                "controller_name": "derive_cesf_long_vol", "execution_environment": "mainnet_legacy_v2",
+                "controller_name": "derive_cesf_long_vol", "execution_environment": "mainnet_v3",
                 "markets": ["ETH", "BTC", "SOL", "HYPE"], "restricted_drawdown": -float(RESTRICTED_DRAWDOWN),
                 "hard_stop_drawdown": -float(HARD_STOP_DRAWDOWN), "controller_settings": FIXED_SETTINGS}
     if (profile != identity or any(not exact(profile["controller_settings"].get(k), v)
@@ -90,7 +90,7 @@ def validate_package(root=ROOT, condor_root=None):
                          "bot_mode": "bot", "bot_name": "flyby-flyby_operator", "total_amount_quote": 800,
                          "frequency_sec": 60, "tick_timeout_sec": 0, "canvas_enabled": False,
                          "server_name": "", "agent_key": ""}
-    limits = {"max_position_size_quote": 320, "max_open_executors": 1, "max_leverage": 2,
+    limits = {"max_position_size_quote": 320, "max_open_executors": 2, "max_leverage": 2,
               "max_drawdown_pct": -1, "shutdown_drawdown_pct": -1}
     if (loop_meta.get("name") != "Flyby Operator" or loop_meta.get("agent_key") is not None
             or loop_meta.get("skills") != [] or not loop_body.strip()
@@ -140,12 +140,13 @@ def validate_package(root=ROOT, condor_root=None):
         if source.read_bytes() != target.read_bytes():
             raise ValueError(f"condor_active_sample_drift:{market}")
         active = yaml.safe_load(target.read_text())
-        expected = {**FIXED_SETTINGS, "manual_kill_switch": False,
+        expected = {**FIXED_SETTINGS, "manual_kill_switch": False, "max_perp_positions": 2, "max_option_spreads": 2,
                     "id": f"flyby-{market}-active-001", "trading_pair": market.upper() + "-USDC",
                     "candles_connector": "binance_perpetual", "candles_trading_pair": market.upper() + "-USDT"}
         if market == "eth":
             expected.update(exposure_profile=ETH_EXPOSURE_TEST, max_notional_fraction=.40,
-                            max_gross_exposure_fraction=.40, option_gross_fraction=.75)
+                            max_gross_exposure_fraction=.40, option_gross_fraction=.75,
+                            options_enabled=True, options_execution_mode="rfq_v3")
         if (not isinstance(active, dict) or set(active) != set(expected)
                 or any(not exact(active.get(k), v) for k, v in expected.items())):
             raise ValueError(f"invalid_condor_active_sample:{market}")

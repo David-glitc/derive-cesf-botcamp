@@ -52,7 +52,7 @@ def test_abi_matches_official_maker_opposite_quantity_layout():
 
 def test_real_hb_signer_and_auth_serializer_preserve_atomic_payload():
     quote, inst, module = quote_fixture()
-    connector = SimpleNamespace(domain="derive_perpetual", FLYBY_COMPATIBILITY_VERSION="flyby-derive-2.17.0-r1",
+    connector = SimpleNamespace(domain="derive_perpetual", FLYBY_COMPATIBILITY_VERSION="flyby-derive-v3-r2",
         _subacct_id=42, _auth=signer_fixture(), current_timestamp=NOW, _account_available_balances={})
     calls = []
     async def post(**kwargs):
@@ -63,16 +63,19 @@ def test_real_hb_signer_and_auth_serializer_preserve_atomic_payload():
         return {"result": {"tx_status": "requested"}}
     connector._api_post = post
     adapter = DeriveRFQTransport(connector)
-    asyncio.run(adapter.execute(quote, ".05", 1800000000000000, "owned-rfq", NOW, plan(), "entry"))
+    asyncio.run(adapter.execute(quote, ".05", 1800000000000000000, "owned-rfq", NOW, plan(), "entry"))
     sent = calls[-1]["data"]
     assert len(sent["legs"]) == 2 and "type" not in sent and sent["direction"] == "buy"
-    assert sent["signature_expiry_sec"] == NOW + 600 and calls[-1]["is_auth_required"] is True
+    assert sent["signature_expiry_sec"] == NOW + 3600 and calls[-1]["is_auth_required"] is True
     action = SignedAction(subaccount_id=42, owner=connector._auth._wallet_address, signer=sent["signer"],
-        signature_expiry_sec=sent["signature_expiry_sec"], nonce=sent["nonce"], module_address=RFQ_MODULE,
+        signature_expiry_sec=sent["signature_expiry_sec"], nonce=int(sent["nonce"]), module_address=RFQ_MODULE,
         module_data=module, DOMAIN_SEPARATOR=adapter.constants.DOMAIN_SEPARATOR,
         ACTION_TYPEHASH=adapter.constants.ACTION_TYPEHASH, signature=sent["signature"])
     action.validate_signature()
-    request = RESTRequest(method=RESTMethod.POST, url="https://api.lyra.finance/private/execute_quote", data=json.dumps(sent))
+    assert isinstance(sent["nonce"], str) and len(sent["nonce"]) == 19
+    headers = connector._auth.header_for_authentication()
+    assert "X-DeriveWallet" in headers and "X-LyraWallet" not in headers and headers["User-Agent"]
+    request = RESTRequest(method=RESTMethod.POST, url="https://api.derive.xyz/v3/private/execute_quote", data=json.dumps(sent))
     encoded = connector._auth.add_auth_to_params_post(deepcopy(sent), request)
     assert json.loads(encoded) == sent
 
@@ -80,7 +83,7 @@ def test_real_hb_signer_and_auth_serializer_preserve_atomic_payload():
 @pytest.mark.parametrize("mutation", ["hash", "clock", "expiry", "type", "strike", "lot", "kind"])
 def test_pre_sign_validation_never_submits_an_invalid_spread(mutation):
     quote, inst, _ = quote_fixture()
-    connector = SimpleNamespace(domain="derive_perpetual", FLYBY_COMPATIBILITY_VERSION="flyby-derive-2.17.0-r1",
+    connector = SimpleNamespace(domain="derive_perpetual", FLYBY_COMPATIBILITY_VERSION="flyby-derive-v3-r2",
         _subacct_id=42, _auth=signer_fixture(), current_timestamp=NOW, _account_available_balances={})
     if mutation == "hash": quote["legs_hash"] = "0x" + "00" * 32
     if mutation == "clock": connector.current_timestamp += 6
@@ -113,7 +116,7 @@ def test_rfq_profiles_load_paused_with_unchanged_risk_caps():
     for market in ("eth", "btc"):
         raw = yaml.safe_load((ROOT / f"conf/controllers/conf_flyby_options_{market}.yml").read_text())
         config = DeriveCesfLongVolConfig(**raw)
-        assert config.options_enabled and config.options_execution_mode == "rfq_v2" and config.manual_kill_switch
+        assert config.options_enabled and config.options_execution_mode == "rfq_v3" and config.manual_kill_switch
         assert config.total_amount_quote == 800 and config.risk_fraction == .005
         assert config.max_notional_fraction == .20
     with pytest.raises(ValueError):
@@ -185,7 +188,7 @@ def test_canonical_controller_uses_approved_caps_in_both_entry_sizers(tmp_path, 
 def wired_controller(tmp_path):
     ctl, provider = controller(tmp_path)
     ctl.config = DeriveCesfLongVolConfig(**{**ctl.config.model_dump(), "options_enabled": True,
-        "options_execution_mode": "rfq_v2", "manual_kill_switch": False})
+        "options_execution_mode": "rfq_v3", "manual_kill_switch": False})
     t = Transport()
     j = RFQJournal(ctl._options_path(), account_binding(provider.connector), ctl.config.id)
     ctl._options = OptionsRFQ(t, j, 42)
@@ -253,8 +256,8 @@ def test_owned_options_exposure_and_greeks_are_visible_to_condor(tmp_path, monke
     state["positions"] = asyncio.run(t.account())["positions"]
     state["observed_at"] = NOW
     account = ctl._account(provider.connector, NOW)
-    assert account["committed"] == 60 and not account["entry_allowed"] and account["reconciled"]
+    assert account["committed"] == 60 and account["entry_allowed"] and account["reconciled"]
     context = controller_context(ctl, NOW)
     assert len(context["positions"]) == 2 and context["positions"][0]["delta"] is not None
     assert context["options_execution"]["phase"] == "open"
-    assert context["options_delta"]["execution_mode"] == "atomic_rfq_v2"
+    assert context["options_delta"]["execution_mode"] == "atomic_rfq_v3"

@@ -23,8 +23,8 @@ which checks account, market, stream and reconciliation readiness before it
 deploys/starts the owned bot. Generic samples remain paused. Only
 `derive_perpetual` is accepted. Testnet and paper-trading connector
 overrides fail validation; a wrong or unknown runtime connector domain emits
-no executor actions. Mainnet uses the stock legacy v2 API, not the public v3
-options-capture endpoint. Follow [mainnet setup](../../../../MAINNET_SETUP.md).
+no executor actions. Mainnet uses the reviewed Derive V3 connector and signer
+on Hummingbot's V2 framework. Follow [mainnet setup](../../../../MAINNET_SETUP.md).
 
 Samples now use the operator-approved −15% restricted / −25% hard-stop governor,
 with a shared account-bound checkpoint and no automatic latch reset. Entry/hold

@@ -10,7 +10,7 @@ from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 
 from src.accounting.derive_margin import decimal, margin_snapshot
 
-COMPATIBILITY_VERSION = "flyby-derive-2.17.0-r1"
+COMPATIBILITY_VERSION = "flyby-derive-v3-r2"
 MAX_MARKET_SLIPPAGE = Decimal("0.0015")
 
 
@@ -27,7 +27,7 @@ async def position_map(connector, rows):
         raise ValueError("incomplete_position_snapshot")
     positions = {}
     for row in rows:
-        if row.get("instrument_type") == "option" and getattr(connector, "_flyby_rfq_enabled", False):
+        if row.get("instrument_type") == "option":
             # Retain options in the FULL account snapshot. Never map them to
             # perp positions or send them through PositionExecutor.
             continue
@@ -41,7 +41,9 @@ async def position_map(connector, rows):
             continue
         entry = decimal(row["average_price"])
         pnl = decimal(row["unrealized_pnl"])
-        leverage = decimal(row["leverage"])
+        # V3 cross-margin positions can omit leverage. This value is display
+        # metadata, not sizing permission; never change the configured 2x cap.
+        leverage = decimal(row.get("leverage") or 1)
         if entry <= 0 or leverage <= 0:
             raise ValueError("invalid_position_price_or_leverage")
         side = PositionSide.LONG if amount > 0 else PositionSide.SHORT
@@ -64,7 +66,7 @@ async def update_balances(connector):
             raise ValueError("account_refresh_failed")
         observed = connector.current_timestamp or time.time()
         state = margin_snapshot(response["result"], connector._subacct_id, observed,
-                                allow_options=getattr(connector, "_flyby_rfq_enabled", False))
+                                allow_options=True)
         positions = await position_map(connector, state["positions"])
         if generation != connector._flyby_account_generation:
             raise ValueError("account_changed_during_refresh")
@@ -145,7 +147,7 @@ async def place_order(connector, order_id, trading_pair, amount, trade_type,
     if min(rate, base) < 0:
         raise ValueError("invalid_instrument_fees")
     # max_fee is PER CONTRACT, with a strict > buffer. Cover one step partial fill.
-    fee = 2 * rate * max(reference, price) + (base / step if tif != "post_only" else Decimal(0))
+    fee = 6 * rate * max(reference, price) + (base / step if tif != "post_only" else Decimal(0))
     fee = fee.quantize(Decimal("0.000001"), rounding=ROUND_CEILING) + Decimal("0.000001")
     payload = {"asset_address": instrument["base_asset_address"], "sub_id": instrument["base_asset_sub_id"],
                "limit_price": str(price), "type": "order", "max_fee": str(fee),

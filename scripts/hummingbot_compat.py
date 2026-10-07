@@ -13,7 +13,7 @@ from src.execution.derive_hb import COMPATIBILITY_VERSION
 CONNECTOR = "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_derivative.py"
 EXECUTOR = "hummingbot/strategy_v2/executors/position_executor/position_executor.py"
 ORIGINAL_HASHES = {
-    CONNECTOR: "1cec03be53e233d47fab2130c8bd893486267205ccee3fea3cab1ceaa8bfb80c",
+    CONNECTOR: "1a8aa683c2ad27ea74430420c4d8c0d52cc81c48e623da69381be30dfbc5f7ba",
     EXECUTOR: "09aef3092e616822568272e2b75181267913240398779f4cf57791cddae60c09",
 }
 DELEGATES = {

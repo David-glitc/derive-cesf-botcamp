@@ -26,6 +26,7 @@ class DerivePublic:
     def __init__(self):
         self.session = requests.Session()
         self.session.trust_env = False  # Never inherit .netrc or authenticated proxy settings.
+        self.session.headers.update({"User-Agent": "flyby-v3", "Content-Type": "application/json"})
         self.records = []
 
     def call(self, method, params):
@@ -44,7 +45,7 @@ class DerivePublic:
 
     async def _book(self, ccy):
         import websockets
-        channel = f"orderbook.{ccy}-PERP.10.10"
+        channel = f"orderbook.{ccy}-PERP.1.100"
         sent = time.time()
         kwargs = {"open_timeout": 8, "close_timeout": 2, "max_size": 300000}
         if "proxy" in inspect.signature(websockets.connect).parameters:
@@ -65,7 +66,7 @@ class DerivePublic:
         rows = []
         for page in range(1, 6):
             result = self.call("public/get_all_instruments", {"currency": ccy, "instrument_type": "option",
-                               "expired": False, "page": page, "page_size": 1000})
+                               "expired": False, "page": page, "page_size": 500})
             rows.extend(result["instruments"])
             if page >= result["pagination"]["num_pages"]:
                 names = [row["instrument_name"] for row in rows]
@@ -143,7 +144,7 @@ class DerivePublic:
                 faults.append("invalid_option_record")
         diagnostics = [option_diagnostic(q, received, features.get("forecast_sigma")) for q in options]
         record = {"schema": 1, "kind": "derive_market_context", "network": "mainnet",
-                  "api_generation": "legacy_v2", "ccy": ccy, "received_at": received,
+                  "api_generation": "v3", "ccy": ccy, "received_at": received,
                   "source_ids": [r["id"] for r in self.records[first:]], "interval": "5m",
                   "perp": native, "candles": candles, "features": features,
                   "options": options, "option_diagnostics": diagnostics,

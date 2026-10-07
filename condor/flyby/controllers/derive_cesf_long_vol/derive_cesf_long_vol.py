@@ -37,6 +37,8 @@ from src.runtime.bridge import RuntimeBridge, root_path
 from src.runtime.control import entry_allowed as runtime_entry_allowed, tune_exits
 from src.execution.derive_rfq import DeriveRFQTransport
 from src.execution.options_rfq import OptionsRFQ, RFQJournal, expected_positions, journal_busy
+from src.execution.options_book import OptionsBook
+from src.data.options_feed import OptionsFeed
 from hummingbot.core.data_type.common import TradeType, PositionMode, OrderType
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig
 from hummingbot.strategy_v2.controllers.directional_trading_controller_base import (
@@ -76,6 +78,8 @@ class DeriveCesfLongVolConfig(DirectionalTradingControllerConfigBase):
     runtime_oversight_mode: str = "off"
     options_enabled: bool = False
     options_execution_mode: str = "shadow"
+    max_perp_positions: int = Field(default=1, ge=1, le=2)
+    max_option_spreads: int = Field(default=1, ge=1, le=2)
     options_signal_enabled: bool = True
     option_buy_moneyness: str = "any"
     option_buy_delta_target: float = Field(default=.50, ge=.25, le=.70)
@@ -119,10 +123,10 @@ class DeriveCesfLongVolConfig(DirectionalTradingControllerConfigBase):
             raise ValueError("Competition Flyby requires mainnet derive_perpetual; testnet/paper connectors are not allowed")
         if self.position_mode != PositionMode.ONEWAY:
             raise ValueError("Derive supports ONEWAY positions")
-        if self.options_execution_mode not in ("shadow", "rfq_v2"):
+        if self.options_execution_mode not in ("shadow", "rfq_v3"):
             raise ValueError("unknown_options_execution_mode")
-        if self.options_enabled != (self.options_execution_mode == "rfq_v2"):
-            raise ValueError("options_enabled requires explicit rfq_v2 execution mode")
+        if self.options_enabled != (self.options_execution_mode == "rfq_v3"):
+            raise ValueError("options_enabled requires explicit rfq_v3 execution mode")
         if self.portfolio_margin or self.spot_hedge_enabled:
             raise ValueError("portfolio margin and spot hedges are not supported")
         if self.options_enabled and (self.trading_pair not in ("ETH-USDC", "BTC-USDC") or not self.options_signal_enabled):
@@ -153,10 +157,16 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
         self._risk = None
         self._risk_error = False
         self._options = None
+        self._option_feed = None
         self._legacy_risk_path = Path("data") / f"flyby-risk-{config.id}.json"
         self._runtime_session = uuid.uuid4().hex
         self._runtime_bridge = None
         self._runtime_error = None
+
+    def stop(self):
+        if self._option_feed is not None:
+            self._option_feed.close()
+        super().stop()
 
     def _publish_runtime(self):
         if self.config.runtime_oversight_mode == "off":
@@ -211,13 +221,22 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
                      and c.market_data_provider.get_connector(c.config.connector_name) is connector]
             if peers:
                 raise ValueError("one_rfq_controller_per_account_required")
-            journal = RFQJournal(self._options_path(), account_binding(connector), self.config.id)
-            self._options = OptionsRFQ(DeriveRFQTransport(connector), journal, int(connector._subacct_id),
+            self._options = OptionsBook(DeriveRFQTransport(connector), self._options_path(),
+                account_binding(connector), self.config.id, int(connector._subacct_id),
+                max_spreads=self.config.max_option_spreads,
+                background_owned=lambda account: self._account(connector, float(account["observed_at"]))["reconciled"],
                 exposure_profile=self.config.exposure_profile, underlying=self.config.trading_pair.split("-")[0])
+            self._option_feed = OptionsFeed(self._options.transport, self.config.trading_pair.split("-")[0])
         connector._flyby_rfq_enabled = True
 
     def _options_busy(self, connector):
-        return journal_busy(self._options_path(), account_binding(connector))
+        peers = [c for c in self._controllers if c._options is not None
+                 and c.market_data_provider.get_connector(c.config.connector_name) is connector]
+        if peers:
+            return any(getattr(c._options, "blocked", c._options.busy) for c in peers)
+        # Until the journal-owning profile is loaded, never bypass recovery.
+        return journal_busy(self._options_path(), account_binding(connector)) or journal_busy(
+            self._options_path().with_name(self._options_path().stem + "-slot-2.json"), account_binding(connector))
 
     def _mainnet_connector(self):
         if self.config.connector_name != MAINNET_CONNECTOR:
@@ -247,7 +266,9 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
         peers = [c for c in self._controllers
                  if c.market_data_provider.get_connector(c.config.connector_name) is connector]
         if any(c.config.risk_state_id != self.config.risk_state_id
-               or c.config.total_amount_quote != self.config.total_amount_quote for c in peers):
+               or c.config.total_amount_quote != self.config.total_amount_quote
+               or c.config.max_perp_positions != self.config.max_perp_positions
+               or c.config.max_option_spreads != self.config.max_option_spreads for c in peers):
             raise ValueError("shared_account_risk_contract_mismatch")
         self._risk_store = RiskCheckpoint(self._risk_path, account_binding(connector), self.config.total_amount_quote)
         self._risk, risk = self._risk_store.observe(state["equity"], now,
@@ -265,6 +286,8 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
         active = [e for c in peers for e in c.executors_info if e.is_active]
         known_ids = {oid for e in active for oid in e.custom_info.get("order_ids", [])}
         known_orders = all(o.client_order_id in known_ids for o in orders)
+        # Also reconcile venue orders absent from the local in-flight cache.
+        known_orders = known_orders and all(o.get("label") in known_ids for o in state["open_orders"])
         # HB's ExecutorInfo exposes order IDs but not net remaining base.
         # Match position sign and upper bound; exact fill reconciliation is
         # still an adapter preflight requirement, not a claimed ledger bridge.
@@ -273,11 +296,17 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
             and (float(p.amount) > 0) == (e.config.side == TradeType.BUY)
             and abs(float(p.amount)) <= float(e.config.amount) + 1e-9
             for e in active) for p in positions if p.amount)
-        known_options = not option_positions or any(c._options is not None and c._options.busy
-            and option_positions == expected_positions(c._options.journal.state["plan"]) for c in peers)
+        known_options = not option_positions or any(c._options is not None and c._options.busy and
+            (c._options.owns(option_positions) if isinstance(c._options, OptionsBook) else
+             option_positions == expected_positions(c._options.journal.state["plan"])) for c in peers)
+        perp_count = max(len(active), sum(bool(p.amount) for p in positions))
+        delta_units = sum(float(p.amount) for p in positions if p.trading_pair == self.config.trading_pair)
+        for row in state.get("positions", []):
+            if row.get("instrument_type") == "option" and row["instrument_name"].startswith(self.config.trading_pair.split("-")[0] + "-"):
+                delta_units += float(Decimal(str(row["amount"])) * Decimal(str(row["delta"])))
         return {**risk, "equity": min(cap, equity), "venue_equity": state["equity"], "available": min(cap, available),
-                "committed": committed,
-                "entry_allowed": not orders and not state["open_orders"] and not any(p.amount for p in positions) and not option_positions,
+                "committed": committed, "perp_positions": perp_count, "delta_units": delta_units,
+                "entry_allowed": not orders and not state["open_orders"] and known_positions and known_options,
                 "margin_source": state["source"], "margin_age": now - state["observed_at"],
                 "reconciled": known_orders and known_positions and known_options}
 
@@ -350,7 +379,9 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
                                    "signal_source": self.config.signal_source,
                                    "execution_environment": execution_environment(),
                                    "options_execution": self._options.status() if self._options else live_options_status()}
-            self._update_options_shadow(now)
+            if self._option_feed is not None:
+                self._option_feed.poll()
+            self._update_options_shadow(self.market_data_provider.time())
         except (ValueError, KeyError, TypeError, AttributeError, IndexError, OSError) as exc:
             self._halt(str(exc) if isinstance(exc, ValueError) else f"adapter_error:{type(exc).__name__}")
         finally:
@@ -369,19 +400,20 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
             adjustment, runtime_error = self._runtime_adjustment()
             peers = [c for c in self._controllers
                      if c.market_data_provider.get_connector(c.config.connector_name) is connector]
+            continuing_entry = (any(s.journal.state.get("intent") == "entry" and
+                s.journal.state["phase"] in ("requesting", "quoting_entry") for s in self._options.slots)
+                if isinstance(self._options, OptionsBook) else self._options.busy)
             allow = bool(fresh and not data.get("halt", True) and not self.config.manual_kill_switch
                          and data.get("reconciled") and data.get("entry_allowed")
-                         and not any(e.is_active for c in peers for e in c.executors_info)
-                         and (self._options.busy or self._reservations.get(id(connector), 0) <= now))
+                         and (continuing_entry or self._reservations.get(id(connector), 0) <= now))
             if self.config.runtime_oversight_mode == "bounded":
                 allow = bool(allow and not runtime_error and runtime_entry_allowed(
                     adjustment, data.get("confidence", 0), data.get("confidence_floor", .70)))
-            s = self._options.journal.state
             plan = data.get("spread_plan")
-            expected_signal = 1 if s.get("plan", {}).get("kind") == "call" else -1
             force = bool(self.config.manual_kill_switch or data.get("halt", True) or not fresh
-                         or data.get("signal", 0) != expected_signal or data.get("risk_mode") == "hard_stop")
+                         or data.get("risk_mode") == "hard_stop")
             force = bool(force or adjustment.get("close_options", False))
+            force_by_plan = lambda p: force or data.get("signal", 0) != (1 if p and p.get("kind") == "call" else -1)
             def entry_budget(account, timestamp):
                 # Re-observe the FULL fresh account, not cached candle-tick equity.
                 _, risk = self._risk_store.observe(account["equity"], timestamp)
@@ -393,7 +425,7 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
                         or self.config.manual_kill_switch or not 0 <= timestamp - data.get("updated_at", 0) <= 5
                         or not 0 <= timestamp - connector._user_stream_tracker.last_recv_time <= self.config.max_user_stream_age
                         or timestamp - self._last_book_time > self.config.max_book_age
-                        or any(e.is_active for c in peers for e in c.executors_info)):
+                        or not self._account(connector, timestamp)["entry_allowed"]):
                     return 0
                 return min(float(account["available"]), float(self.config.total_amount_quote) * .01,
                            risk["risk_trade_budget"]) * latest.get("size_multiplier", 1)
@@ -408,16 +440,18 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
                     self._risk_store = RiskCheckpoint(self._risk_path, account_binding(connector), self.config.total_amount_quote)
                 _, risk = self._risk_store.observe(account["equity"], timestamp)
                 return risk["risk_mode"] == "hard_stop"
-            reserved = allow and not self._options.busy
+            prior_count = getattr(self._options, "open_count", int(self._options.busy))
+            reserved = allow and prior_count < self.config.max_option_spreads and not getattr(self._options, "blocked", self._options.busy)
             if reserved:
                 self._reservations[id(connector)] = now + 60
             await self._options.tick(now, plan=plan, budget=data.get("risk_trade_budget", 0) * adjustment.get("size_multiplier", 1), allow_entry=allow,
-                                     force_exit=force, consume_entry=consume, entry_budget=entry_budget,
+                                     force_exit=force_by_plan if isinstance(self._options, OptionsBook) else force_by_plan(self._options.journal.state.get("plan")),
+                                     consume_entry=consume, entry_budget=entry_budget,
                                      exit_required=exit_required)
-            if reserved and not self._options.busy:
+            if reserved and getattr(self._options, "open_count", int(self._options.busy)) == prior_count:
                 self._reservations.pop(id(connector), None)
             data["options_execution"] = self._options.status()
-            if self._options.busy:
+            if getattr(self._options, "blocked", self._options.busy):
                 data["entry_block"] = "atomic_options_lifecycle_active"
         except Exception:
             self._halt("rfq_lifecycle_unavailable")
@@ -455,6 +489,7 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
             self._halt("account_recheck_failed")
             return []
         if (not account["entry_allowed"] or not account["reconciled"] or not connector.ready
+                or account["perp_positions"] >= self.config.max_perp_positions
                 or now - data.get("updated_at", 0) > 5
                 or not 0 <= now - connector._user_stream_tracker.last_recv_time <= self.config.max_user_stream_age
                 or now - self._last_book_time > self.config.max_book_age
@@ -641,12 +676,18 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
             ccy = self.config.trading_pair.split("-")[0]
             if ccy not in ("ETH", "BTC"):
                 return
-            market = load_market(Path("data") / f"flyby-market-{ccy}.json", now, ccy)
+            market = self._option_feed.market if self._option_feed is not None else load_market(
+                Path("data") / f"flyby-market-{ccy}.json", now, ccy)
+            if market is None:
+                return
             if not 0 <= now - market["perp"]["timestamp"] <= 5:
                 return
             spot = float(market["perp"]["index"])
             quotes, metadata, ivs = [], {}, []
+            exclusions = self._options.planning_exclusions if isinstance(self._options, OptionsBook) else set()
             for raw in market["options"]:
+                if raw["instrument"] in exclusions:
+                    continue
                 if not raw["quoted"] or raw.get("delta") is None or not 0 <= now - raw["timestamp"] <= 5:
                     continue
                 q, fee = normalize_quote(raw)
@@ -700,6 +741,7 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
                                     net_fraction=min(.20, self.config.max_notional_fraction),
                                     gross_fraction=self.config.option_gross_fraction, exposure_profile=self.config.exposure_profile,
                                     committed_gross_quote=snapshot["committed"],
+                                    existing_units=snapshot["delta_units"],
                                     buy_moneyness=self.config.option_buy_moneyness,
                                     buy_target=self.config.option_buy_delta_target,
                                     sell_target=self.config.option_sell_delta_target)
@@ -716,7 +758,7 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
         except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError, OSError):
             self.processed_data["options_delta"]["status"] = "invalid_account_or_delta"
             return None
-        self.processed_data["spread_plan"] = plan.to_dict() if plan else None
+        self.processed_data["spread_plan"] = {**plan.to_dict(), "committed_gross_quote": snapshot["committed"]} if plan else None
         self.processed_data["options_delta"] = delta_context(self.processed_data["spread_plan"], now)
         return plan
 

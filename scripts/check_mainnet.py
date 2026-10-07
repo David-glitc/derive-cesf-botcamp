@@ -46,7 +46,7 @@ def validate_profiles(root=ROOT):
         rfq = yaml.safe_load(optional.read_text())
         expected = {**FIXED_SETTINGS, "id": f"flyby-{name}-001", "trading_pair": name.upper() + "-USDC",
                     "candles_connector": "binance_perpetual", "candles_trading_pair": name.upper() + "-USDT",
-                    "options_enabled": True, "options_execution_mode": "rfq_v2"}
+                    "options_enabled": True, "options_execution_mode": "rfq_v3"}
         if (not isinstance(rfq, dict) or set(rfq) != set(expected)
                 or any(not exact(rfq.get(k), v) for k, v in expected.items())):
             raise ValueError(f"fixed_paused_rfq_settings_required:{name}")
@@ -54,7 +54,7 @@ def validate_profiles(root=ROOT):
     if candidate.exists():
         expected = {**FIXED_SETTINGS, "id": "flyby-eth-cap-test-001", "trading_pair": "ETH-USDC",
                     "candles_connector": "binance_perpetual", "candles_trading_pair": "ETH-USDT",
-                    "options_enabled": True, "options_execution_mode": "rfq_v2",
+                    "options_enabled": True, "options_execution_mode": "rfq_v3",
                     "exposure_profile": ETH_EXPOSURE_TEST, "max_notional_fraction": .40,
                     "max_gross_exposure_fraction": .40, "option_gross_fraction": .75}
         raw = yaml.safe_load(candidate.read_text())
@@ -64,12 +64,13 @@ def validate_profiles(root=ROOT):
 
     # Separate operator activation configs are opt-in and must match the exact
     # reviewed ETH+SOL values; the default/sample profiles above remain paused.
-    active_common = {**FIXED_SETTINGS, "manual_kill_switch": False}
+    active_common = {**FIXED_SETTINGS, "manual_kill_switch": False, "max_perp_positions": 2, "max_option_spreads": 2}
     active_expected = {
         "eth": {**active_common, "id": "flyby-eth-active-001", "trading_pair": "ETH-USDC",
                 "candles_connector": "binance_perpetual", "candles_trading_pair": "ETH-USDT",
                 "exposure_profile": ETH_EXPOSURE_TEST, "max_notional_fraction": .40,
-                "max_gross_exposure_fraction": .40, "option_gross_fraction": .75},
+                "max_gross_exposure_fraction": .40, "option_gross_fraction": .75,
+                "options_enabled": True, "options_execution_mode": "rfq_v3"},
         "sol": {**active_common, "id": "flyby-sol-active-001", "trading_pair": "SOL-USDC",
                 "candles_connector": "binance_perpetual", "candles_trading_pair": "SOL-USDT"},
     }
@@ -100,6 +101,10 @@ def validate_profiles(root=ROOT):
 
 
 def main():
+    if "--profiles-only" in sys.argv:
+        validate_profiles()
+        print(json.dumps({**execution_environment(), "profiles_valid": True, "orders_submitted": 0}))
+        return 0
     try:
         from hummingbot.connector.derivative.derive_perpetual import derive_perpetual_constants
         validate_installed_endpoints(derive_perpetual_constants)
@@ -109,6 +114,9 @@ def main():
         return 1
     from hummingbot.connector.derivative.derive_perpetual.derive_perpetual_derivative import DerivePerpetualDerivative
     print(json.dumps({**execution_environment(), "install_profiles_paused": True,
+                      "install_profiles_paused_scope": "four baseline samples; selected active samples are separate",
+                      "selected_active_profiles": ["flyby-eth-active-001", "flyby-sol-active-001"],
+                      "active_eth_options_enabled": True,
                       "compatibility_version": getattr(DerivePerpetualDerivative, "FLYBY_COMPATIBILITY_VERSION", None),
                       "account_verified": False, "live_execution_verified": False,
                       "orders_submitted": 0}, indent=2))

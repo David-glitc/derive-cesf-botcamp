@@ -32,7 +32,8 @@ links, unexpected/runtime files, sample drift and changed profile settings.
 1. Resolve your writable root using `condor.paths.local_agents_root()` inside
    the team's Condor environment. Don't assume stock `agents/` is writable.
 2. Run the installer with `--agents-root` set to that explicit path. If `flyby`
-   exists, review it first: the installer won't overwrite its identity or state.
+   exists, use the backed-up authored-file upgrade in [the handoff](SYNC_HANDOFF.md);
+   the fresh installer won't overwrite its identity or state.
    Never install over the generic `condor` agent.
 3. Confirm `AgentStore().get("flyby")` discovers the identity and
    `StrategyStore().get_by_key("flyby.flyby_operator")` discovers the loop.
@@ -64,6 +65,9 @@ drawdown is a different measurement. The team chooses compatible markets.
 Don't increase caps to meet ETH/BTC minimums.
 
 The four samples keep live options disabled. A separate operator-approved
+ETH active sample now enables V3 atomic options; SOL active options stay disabled.
+The selected lane allows up to two perps and two spreads without widening loss
+or aggregate exposure limits. A separate paused
 [atomic RFQ profile](../OPTIONS_EXECUTION.md) is an explicit execution extension,
 not an automatic update to those samples. Portfolio margin and spot hedging
 stay disabled. The loop operates the selected controller and journals its

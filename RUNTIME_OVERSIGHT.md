@@ -159,7 +159,9 @@ intercepts upstream emergency winddown so completion ends only the observer.
 The monotonic deadline starts at its first selected tick; no automatic restart
 is enabled. Read-only observation consumes no adjustment receipts.
 Follow the [observation run procedure](condor/OBSERVATION_RUN.md). The shipped
-default remains a one-tick dry run, and no real-time run has started here.
+default is a continuous native controller loop with runtime oversight off;
+the optional adapter remains a separate oversight-only seat. No real-time run
+has started here.
 
 See [mainnet launch gates](COMPETITION_READINESS.md) and
 [planning/control boundary](condor/flyby/loops/flyby_operator/loop.md).

@@ -1,4 +1,14 @@
-# Live readiness — NO-GO (2026-10-03)
+# Live readiness — private execution unverified (2026-10-07)
+
+Current integration uses Derive V3 signing/data on Hummingbot V2, selected ETH+SOL,
+ETH atomic options enabled, and account limits of two perps/two spread structures.
+The handoff now specifies MCP origins, backed-up existing-agent upgrades, exact
+$200 global/null controller deployment caps and an isolated prepared image.
+See [the current handoff](condor/SYNC_HANDOFF.md). No service was started or
+private order submitted here. The dated research and prior V2 verification below
+remain historical evidence, not certification of V3 fills or profitability.
+
+## Historical evaluation and earlier verification
 
 The new [bounded Condor runtime extension](RUNTIME_OVERSIGHT.md) refreshes private
 controller/account state, exposes read-only tools and accepts reviewed veto,

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_submission_profiles_and_manifest_are_mainnet_only():
     validate_profiles()
-    assert execution_environment()["api_generation"] == "legacy_v2"
+    assert execution_environment()["api_generation"] == "v3"
 
 
 @pytest.mark.parametrize("domain", ["derive_perpetual_testnet", "derive_perpetual_paper_trade", "derive", None])
@@ -39,8 +39,8 @@ def test_mainnet_connector_is_accepted_without_account_access():
 ])
 def test_mismatched_installed_endpoints_fail_closed(key, value):
     constants = SimpleNamespace(DEFAULT_DOMAIN="derive_perpetual",
-                                BASE_URL="https://api.lyra.finance",
-                                WSS_URL="wss://api.lyra.finance/ws")
+                                BASE_URL="https://api.derive.xyz/v3",
+                                WSS_URL="wss://api.derive.xyz/v3/ws")
     validate_installed_endpoints(constants)
     setattr(constants, key, value)
     with pytest.raises(ValueError, match=f"unsupported_mainnet_connector:{key}"):
@@ -63,10 +63,10 @@ def test_preflight_rejects_changed_profiles(tmp_path, change, reason):
         validate_profiles(tmp_path)
 
 
-def test_manifest_cannot_claim_v3_for_legacy_install(tmp_path):
+def test_manifest_cannot_claim_legacy_for_v3_install(tmp_path):
     shutil.copytree(ROOT / "conf", tmp_path / "conf")
     manifest = json.loads((ROOT / "hummingbot-version.json").read_text())
-    manifest["execution_environment"]["api_generation"] = "v3"
+    manifest["execution_environment"]["api_generation"] = "legacy_v2"
     (tmp_path / "hummingbot-version.json").write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="mainnet_manifest_mismatch"):
         validate_profiles(tmp_path)

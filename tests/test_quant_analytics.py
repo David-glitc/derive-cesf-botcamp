@@ -121,14 +121,14 @@ def test_ranking_fails_closed(fault):
 def test_bounded_public_ws_snapshot_records_channel_and_rejects_wrong_frames(monkeypatch):
     sent, kwargs = [], {}
     messages = [{"params": {"channel": "wrong", "data": book()}},
-                {"params": {"channel": "orderbook.ETH-PERP.10.10", "data": book()}}]
+                {"params": {"channel": "orderbook.ETH-PERP.1.100", "data": book()}}]
     class Socket:
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass
         async def send(self, data): sent.append(json.loads(data))
         async def recv(self): return json.dumps(messages.pop(0))
     def connect(url, **kw):
-        assert url == "wss://api.lyra.finance/ws"
+        assert url == "wss://api.derive.xyz/v3/ws"
         kwargs.update(kw)
         return Socket()
     monkeypatch.setattr("websockets.connect", connect)
@@ -136,5 +136,5 @@ def test_bounded_public_ws_snapshot_records_channel_and_rejects_wrong_frames(mon
     raw = asyncio.run(client._book("ETH"))
     assert raw == book() and len(sent) == 1 and sent[0]["method"] == "subscribe"
     assert kwargs["open_timeout"] == 8 and kwargs["max_size"] == 300000
-    assert client.records[0]["params"] == {"channel": "orderbook.ETH-PERP.10.10"}
+    assert client.records[0]["params"] == {"channel": "orderbook.ETH-PERP.1.100"}
     assert client.records[0]["method"] == "ws/orderbook"

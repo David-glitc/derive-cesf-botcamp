@@ -29,10 +29,8 @@ def ticker():
 
 
 def perp():
-    return {"instrument_name": "ETH-PERP", "instrument_type": "perp", "timestamp": NOW * 1000,
-            "index_price": 3000, "mark_price": 3001, "best_bid_price": 2999,
-            "best_ask_price": 3001, "best_bid_amount": 10, "best_ask_amount": 10,
-            "perp_details": {"funding_rate": .00001}}
+    return {"instrument_name": "ETH-PERP", "instrument_type": "perp", "t": NOW * 1000,
+            "I": 3000, "M": 3001, "b": 2999, "a": 3001, "B": 10, "A": 10, "f": .00001}
 
 
 def seal(body):
@@ -42,7 +40,7 @@ def seal(body):
 def snapshot():
     source = public_record("public/get_ticker", perp(), NOW - 1, NOW)
     body = {"schema": 1, "kind": "derive_market_context", "network": "mainnet",
-            "api_generation": "legacy_v2", "ccy": "ETH", "received_at": NOW, "source_ids": [source["id"]],
+            "api_generation": "v3", "ccy": "ETH", "received_at": NOW, "source_ids": [source["id"]],
             "perp": normalize_perp(perp(), "ETH", NOW), "interval": "5m", "candles": [],
             "options": [normalize_option(definition(), ticker(), "ETH", NOW)],
             "features": {"valid": False, "forecast_sigma": .6}, "faults": []}
@@ -87,7 +85,7 @@ def test_missing_iv_oi_are_unknown_not_zero():
     assert option_diagnostic(q, NOW)["reason"] == "missing_or_invalid_pricing_inputs"
 
 
-@pytest.mark.parametrize("field", ["index_price", "best_bid_price", "best_ask_amount", "timestamp"])
+@pytest.mark.parametrize("field", ["I", "b", "A", "t"])
 def test_invalid_perp_numbers(field):
     p = perp()
     p[field] = -1
@@ -97,7 +95,7 @@ def test_invalid_perp_numbers(field):
 def test_perp_schema_and_future_freshness():
     p = perp()
     assert normalize_perp(p, "ETH", NOW)["basis"] == pytest.approx(1 / 3000)
-    p["timestamp"] += 1000
+    p["t"] += 1000
     assert not normalize_perp(p, "ETH", NOW)["fresh"]
     with pytest.raises(ValueError): normalize_perp(p, "BTC", NOW)
 
@@ -154,7 +152,7 @@ def test_snapshot_provenance(fault):
     now = NOW
     if fault == "checksum": s["features"]["forecast_sigma"] = .8
     if fault == "network": s = seal({**s, "network": "testnet"})
-    if fault == "api": s = seal({**s, "api_generation": "v3"})
+    if fault == "api": s = seal({**s, "api_generation": "legacy_v2"})
     if fault == "ccy": s = seal({**s, "ccy": "BTC"})
     if fault == "stale": now += 31
     if fault == "future": now -= 1
@@ -172,7 +170,7 @@ def test_public_client_no_private_methods_credentials_redirects():
     with pytest.raises(ValueError): client.call("private/order", {})
     assert not calls
     client.call("public/get_ticker", {"instrument_name": "ETH-PERP"})
-    assert calls[0][0] == "https://api.lyra.finance/public/get_ticker"
+    assert calls[0][0] == "https://api.derive.xyz/v3/public/get_ticker"
     assert calls[0][1]["allow_redirects"] is False and calls[0][1]["timeout"] == 8
     assert len(client.records) == 1
 
@@ -234,14 +232,14 @@ def test_full_public_capture_with_bounded_fake_responses(monkeypatch, fault):
         index.append({"timestamp_bucket": t, **{f"{k}_price": float(row[k]) for k in ("open", "high", "low", "close")}})
         trades.append({"timestamp_bucket": t, "volume_contracts": float(row.volume)})
     p, d, t = perp(), definition(), ticker()
-    p["index_price"] = float(frame.close.iloc[-1])
-    p["mark_price"] = p["index_price"]
+    p["I"] = float(frame.close.iloc[-1])
+    p["M"] = p["I"]
     if fault == "missing_volume": trades.pop()
     if fault == "gap": index.pop(20)
     if fault == "warmup": index = index[-10:]
-    if fault == "stale_perp": p["timestamp"] -= 6000
-    if fault == "future_perp": p["timestamp"] += 1000
-    if fault == "basis": p["index_price"] *= 1.1
+    if fault == "stale_perp": p["t"] -= 6000
+    if fault == "future_perp": p["t"] += 1000
+    if fault == "basis": p["I"] *= 1.1
     if fault == "bad_option": t["a"] = "invalid"
     if fault == "no_l1": t["a"] = t["b"] = 0
     responses = {"public/get_all_instruments": {"instruments": [d], "pagination": {"num_pages": 1}},

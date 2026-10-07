@@ -1,0 +1,30 @@
+{
+  "upstream_repository": "https://github.com/isreallee82/hummingbot",
+  "upstream_pr": "https://github.com/hummingbot/hummingbot/pull/8491",
+  "upstream_commit": "817cf2b42822e720d6074392c90e53d43f3c6264",
+  "framework": "Hummingbot V2",
+  "base_release": "2.17.0",
+  "base_commit": "9af100d6822da7d2d0291a906c730ef172284ee2",
+  "files": {
+    "hummingbot/connector/other/derive_common_utils.py": "c0bbc2451936986a19530e90b4c8702ac315548c9a518cad7f2a37ecb9de2057",
+    "hummingbot/connector/derivative/derive_perpetual/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_api_order_book_data_source.py": "80652710e907063fa26b9ef4630239f6d156b7517944c7a9baeaca6c0f5c2dae",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_api_user_stream_data_source.py": "8c73ddcd61745f1b621d2c474ec7d33c6a52dac9e92354b4cb1a75f03ab9b17a",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_auth.py": "0e3902bfb21b3303b484d179297aab436a54b91221f1efec4d5095c71c1e58c5",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_constants.py": "36ed86e1250f4d0019246e01fb605bdf63530898e60afeb04a84daf768952047",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_derivative.py": "1a8aa683c2ad27ea74430420c4d8c0d52cc81c48e623da69381be30dfbc5f7ba",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_utils.py": "896e1c56e639c58be12315ae75034d66b6ed98576125e1f27e9ca681093a33e1",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_web_utils.py": "522286dc8d861584a33d9346728151995f43bb3d5fd05e30f9fe916fd166ad28"
+  },
+  "legacy_files": {
+    "hummingbot/connector/other/derive_common_utils.py": "bd5b8ecc059b88cfeb04129a492258f1bc529651bd054014123c1d78326b7955",
+    "hummingbot/connector/derivative/derive_perpetual/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_web_utils.py": "ce2f4ff4da2d4dd975c537a544f1eda89d5d11b1e9edf81a531b70860c40210f",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_api_order_book_data_source.py": "f63b469f334a5b56ffd35001f0f70385aaf05c1c7da914488df9690cc91a5525",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_api_user_stream_data_source.py": "1ba71e50c4fb63544d46e3d045a8db8b0ee4d2389fa37aab4b23f55e6e9a21f5",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_auth.py": "399b69bb5b016e95cfdff868ba9c5895b77138e29a9c29e3647b18d48316be32",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_derivative.py": "1cec03be53e233d47fab2130c8bd893486267205ccee3fea3cab1ceaa8bfb80c",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_constants.py": "c540c3be5afbf421fa54811c983fa0ae511ae77bb6e815ba8e06fe8f96d247d1",
+    "hummingbot/connector/derivative/derive_perpetual/derive_perpetual_utils.py": "56d92e2796c4d8490054d5a3c6c8e54c9bcc953e1b90af5152f82233cbee167a"
+  }
+}
