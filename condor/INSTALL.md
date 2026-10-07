@@ -6,7 +6,7 @@ Install `condor/flyby/` as agent `flyby` in your Condor agent root. Its loop is
 
 Keep the controller paused. Installation doesn't configure a model, migrate
 credentials, start Condor or enable trading. Follow [Hummingbot setup](../MAINNET_SETUP.md)
-first: the controller wrapper needs the shared package in the pinned client.
+first: the controller imports the shared package, which must be in the pinned client.
 
 ## Verify an isolated installation
 

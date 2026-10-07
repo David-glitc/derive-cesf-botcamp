@@ -38,8 +38,7 @@ samples and not evidence of a profitable adaptive strategy.
 
 | Component | File | Responsibility |
 |---|---|---|
-| V2 controller | [flyby.py](controllers/directional_trading/flyby.py) | Account/book gates, bounded sizing, executor actions |
-| Compatibility name | [derive_cesf_long_vol.py](controllers/directional_trading/derive_cesf_long_vol.py) | Import only; not a second strategy |
+| V2 controller | [derive_cesf_long_vol.py](condor/flyby/controllers/derive_cesf_long_vol/derive_cesf_long_vol.py) | Account/book gates, bounded sizing, executor actions; the single file Condor syncs |
 | Condor policy | [condor_agent.py](agents/condor_agent.py) | Shared deterministic price/volume decision |
 | Condor identity | [agent package](condor/flyby/AGENT.md) | Operator workflow; cannot override risk gates |
 | Condor loop | [loop.md](condor/flyby/loops/flyby_operator/loop.md) | Controller-mode playbook; one dry-run tick by default |
@@ -55,7 +54,7 @@ The [artifact index](SUBMISSION_ARTIFACT.md) lists required dependencies.
 The [final hardening report](reports/FINAL_SUBMISSION_REPORT.md) covers the
 explicit pinned connector patch, BASE-USDC mapping, current minimum-size
 incompatibility and Condor sample discovery. Install using
-[the tested team guide](MAINNET_SETUP.md); importing the Condor wrapper alone
+[the tested team guide](MAINNET_SETUP.md); syncing the Condor controller alone
 doesn't install shared modules or clear launch gates.
 The [strategy explanation](strategy.md) describes implemented rules and limits.
 Legacy research scripts are not the current strategy. The old v3 runner and

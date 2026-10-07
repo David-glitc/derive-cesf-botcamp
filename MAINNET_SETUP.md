@@ -39,8 +39,8 @@ bash /repo/scripts/install_hummingbot.sh /home/hummingbot
 ```
 
 Expected: `Installed mainnet-only paused profiles (derive_perpetual, legacy v2 API).`
-No bot starts. The package installs shared policy/features/risk/options modules;
-the historical controller name remains an import alias, not another strategy.
+No bot starts. The package installs shared policy/features/risk/options modules,
+and the controller is copied from the Condor agent folder (the same file Condor syncs).
 Without compatibility installed, the controller refuses entry.
 
 ## Install the reviewed compatibility patch

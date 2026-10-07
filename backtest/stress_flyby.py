@@ -294,7 +294,7 @@ def main():
     code = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in [ROOT / "agents/condor_agent.py", ROOT / "src/signal/flyby.py",
                          ROOT / "src/risk/position_sizing.py", ROOT / "src/options/spread_builder.py",
-                         ROOT / "src/accounting/ledger.py", ROOT / "controllers/directional_trading/flyby.py",
+                         ROOT / "src/accounting/ledger.py", ROOT / "condor/flyby/controllers/derive_cesf_long_vol/derive_cesf_long_vol.py",
                          ROOT / "conf/controllers/conf_flyby_eth.yml", Path(__file__)]}
     (args.output / "source").mkdir(exist_ok=True)
     for name in code:

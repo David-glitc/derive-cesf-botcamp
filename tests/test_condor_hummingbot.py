@@ -17,7 +17,7 @@ pytest.importorskip("hummingbot", reason="Run this suite in the pinned Hummingbo
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.strategy_v2.models.executors_info import ExecutorInfo
 from hummingbot.strategy_v2.models.base import RunnableStatus
-from controllers.directional_trading.flyby import DeriveCesfLongVolConfig, DeriveCesfLongVolController
+from derive_cesf_long_vol import DeriveCesfLongVolConfig, DeriveCesfLongVolController
 from tests.test_flyby_policy import candles
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,7 +120,7 @@ def test_context_write_failure_does_not_block_protective_stops(tmp_path, monkeyp
     ctl.executors_info = [executor_info(cfg)]
     ctl.config.manual_kill_switch = True
     def fail(*args): raise OSError("disk unavailable")
-    monkeypatch.setattr("controllers.directional_trading.flyby.atomic_owned_json", fail)
+    monkeypatch.setattr("derive_cesf_long_vol.atomic_owned_json", fail)
     report = ctl.get_custom_info()
     assert report["flyby"]["context_file_status"] == "unavailable"
     assert len(ctl.stop_actions_proposal()) == 1
@@ -130,7 +130,7 @@ def test_unexpected_advisory_failure_is_contained(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ctl, provider = controller(tmp_path)
     def fail(*args): raise RuntimeError("unexpected reporting failure")
-    monkeypatch.setattr("controllers.directional_trading.flyby.controller_context", fail)
+    monkeypatch.setattr("derive_cesf_long_vol.controller_context", fail)
     assert ctl.get_custom_info()["flyby"]["context_status"] == "unavailable"
 
 
@@ -265,7 +265,7 @@ def test_fresh_public_chain_automatically_produces_only_shadow_context(tmp_path,
     for q in row["chain"]:
         q.update(timestamp=provider.now, expiry=provider.now + 3 * 86400,
                  quoted=True, pricing={"iv": .5})
-    monkeypatch.setattr("controllers.directional_trading.flyby.load_market", lambda *args:
+    monkeypatch.setattr("derive_cesf_long_vol.load_market", lambda *args:
                         {"perp": {"timestamp": provider.now, "index": ctl.processed_data["entry_mid"]}, "options": row["chain"]})
     ctl._update_options_shadow(provider.now)
     assert ctl.processed_data["spread_plan"]["fees_verified"]
@@ -274,7 +274,7 @@ def test_fresh_public_chain_automatically_produces_only_shadow_context(tmp_path,
     assert ctl.processed_data["options_execution"]["orders_submitted"] == 0
     assert not provider.connector.in_flight_orders
     previous_signal = ctl.processed_data["signal"]
-    monkeypatch.setattr("controllers.directional_trading.flyby.load_market", lambda *args: {})
+    monkeypatch.setattr("derive_cesf_long_vol.load_market", lambda *args: {})
     ctl._update_options_shadow(provider.now)
     assert ctl.processed_data["spread_plan"] is None
     assert ctl.processed_data["signal"] == previous_signal

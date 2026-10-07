@@ -23,6 +23,8 @@ def install(agents_root, root=ROOT):
     try:
         source = root / "condor/flyby"
         for path in source.rglob("*"):
+            if "__pycache__" in path.parts:
+                continue
             destination = target / path.relative_to(source)
             if path.is_dir():
                 destination.mkdir(exist_ok=True)

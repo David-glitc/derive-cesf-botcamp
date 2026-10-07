@@ -15,7 +15,7 @@ from web3 import Web3
 from hummingbot.connector.derivative.derive_perpetual.derive_perpetual_auth import DerivePerpetualAuth
 from hummingbot.connector.other.derive_common_utils import SignedAction
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest
-from controllers.directional_trading.flyby import DeriveCesfLongVolConfig, DeriveCesfLongVolController
+from derive_cesf_long_vol import DeriveCesfLongVolConfig, DeriveCesfLongVolController
 from src.execution.derive_rfq import DeriveRFQTransport, ExecuteModuleData, RFQ_MODULE
 from src.execution.options_rfq import RFQJournal, OptionsRFQ
 from src.execution.derive_hb import update_balances
@@ -153,7 +153,7 @@ def test_baseline_config_cannot_inherit_wider_caps_without_identity(change):
 
 
 def test_canonical_controller_uses_approved_caps_in_both_entry_sizers(tmp_path, monkeypatch):
-    import controllers.directional_trading.flyby as module
+    import derive_cesf_long_vol as module
     from tests.test_flyby_policy import chain
     ctl, provider = controller(tmp_path)
     raw = yaml.safe_load((ROOT / "conf/controllers/conf_flyby_eth_exposure_test.yml").read_text())

@@ -17,7 +17,7 @@ paused; describing the cycle doesn't establish that it is running live.
    connector, a recent private stream, updating order book, uncrossed quotes and
    fresh completed candles. Proxy/reference basis must stay within its limit.
    Failure blocks new entries; owned protective exits still need servicing.
-   See [controller update](controllers/directional_trading/flyby.py).
+   See [controller update](condor/flyby/controllers/derive_cesf_long_vol/derive_cesf_long_vol.py).
 
 3. **Read and reconcile the account.** Read authenticated equity, available funds,
    positions and orders. Unknown exposure isn't treated as zero. Peer controllers

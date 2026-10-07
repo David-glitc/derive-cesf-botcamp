@@ -8,7 +8,7 @@ default_config:
   agent_key: ''
   total_amount_quote: 800
   frequency_sec: 60
-  tick_timeout_sec: 60
+  tick_timeout_sec: 0
   execution_mode: dry_run
   max_ticks: 1
   restart_on_boot: false
@@ -16,12 +16,19 @@ default_config:
   bot_name: flyby-flyby_operator
   canvas_enabled: false
   risk_limits:
-    max_position_size_quote: 160
+    max_position_size_quote: 320
     max_open_executors: 1
     max_leverage: 2
     max_drawdown_pct: -1
     shutdown_drawdown_pct: -1
-default_trading_context: Fixed profile flyby-baseline-dd15-dd25-v1. Paused until the operator clears production launch gates. No independent orders or profile tuning.
+default_trading_context: >-
+  Fixed profile flyby-baseline-dd15-dd25-v1. The operator-selected active profiles
+  are ETH flyby-eth-active-001 and SOL flyby-sol-active-001, from
+  conf_flyby_eth_active.yml and conf_flyby_sol_active.yml, sharing the
+  flyby-competition $800 risk state. This names the intended profiles; it does
+  not prove they are registered on the selected Hummingbot API server. Paused
+  until the operator clears production launch gates. No independent orders or
+  profile tuning.
 ---
 
 # Flyby operator tick
@@ -34,11 +41,17 @@ Condor oversight; the LLM doesn't independently call `decide()` to place trades.
 
 ## Every tick
 
-1. Read `manage_bots(action="status")` and the owned bot's
-   `manage_bots(action="get_config", bot_name="flyby-flyby_operator")`.
-   If no owned bot exists, report `not_deployed`; don't invent status or deploy
-   from the default dry run. Check its controller against `PROFILE.yml` and the
-   selected paused sample. A separately operator-approved RFQ profile differs
+1. Read `manage_bots(action="status")`, the owned bot's
+   `manage_bots(action="get_config", bot_name="flyby-flyby_operator")`, and
+   the registered controller configs. The only selected controller IDs are
+   `flyby-eth-active-001` and `flyby-sol-active-001`, both using
+   `derive_cesf_long_vol`; never substitute `flyby_hedge.py`, `flybyderive.py`
+   or an unrelated controller. If either selected ID is absent or its config
+   differs from the matching active profile, report `controller_not_registered`
+   and do not deploy or trade. If no owned bot/session exists, report
+   `not_deployed`; don't invent status or deploy from the default dry run.
+   Check registered configs against the active profile files and shared
+   `risk_state_id`. A separately operator-approved RFQ profile differs
    only in its two options execution settings; check `OPTIONS_EXECUTION.md`
    rather than silently treating that extension as the default baseline.
    The team installs the complete shared Python package

@@ -67,7 +67,7 @@ def main():
         results.append(result)
         print(json.dumps(result), flush=True)
     passed = all(r["returncode"] == 0 for r in results)
-    files = ["controllers/directional_trading/flyby.py", "agents/condor_agent.py", "src/execution/paired.py",
+    files = ["condor/flyby/controllers/derive_cesf_long_vol/derive_cesf_long_vol.py", "agents/condor_agent.py", "src/execution/paired.py",
              "src/execution/derive_hb.py", "src/accounting/derive_margin.py", "src/risk/venue_sizing.py",
              "src/risk/competition.py",
              "scripts/hummingbot_compat.py",

@@ -1,14 +1,13 @@
 # Competition artifact index
 
 The team runs the V2 controller and its shared Condor policy—not the archived
-v3 testnet runner. The historical controller name remains an import alias.
+v3 testnet runner. The controller exists in one place, inside the Condor agent folder.
 The competition runtime is mainnet-only using the stock Hummingbot legacy v2
 Derive connector, not a Derive v3 trading client.
 
 Required runtime files:
 
-- `controllers/directional_trading/flyby.py`
-- `controllers/directional_trading/derive_cesf_long_vol.py`
+- `condor/flyby/controllers/derive_cesf_long_vol/derive_cesf_long_vol.py`
 - `agents/condor_agent.py`
 - `agents/mainnet.py`
 - `src/signal/`, `src/risk/position_sizing.py`, `src/options/`
@@ -25,9 +24,9 @@ Required runtime files:
   `scripts/check_mainnet.py` and `scripts/install_hummingbot.sh`
 
 For the Condor identity/workflow, import [the agent package](condor/flyby/AGENT.md)
-using the team's provider/model configuration. Its controller registration
-wrapper imports the canonical V2 controller. It doesn't duplicate the strategy
-or create a separate private Derive order client.
+using the team's provider/model configuration. `condor/flyby/` is the only folder
+injected into Condor; its `controllers/derive_cesf_long_vol/` holds the canonical
+V2 controller itself, not a wrapper. It doesn't create a separate private Derive order client.
 The entrypoint is `condor/flyby/AGENT.md` plus
 `condor/flyby/loops/flyby_operator/loop.md`, not the Python policy alone.
 The fixed identity is `flyby-baseline-dd15-dd25-v1` in `condor/flyby/PROFILE.yml`.

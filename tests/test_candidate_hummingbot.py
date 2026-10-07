@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 pytest.importorskip("hummingbot", reason="Requires pinned Hummingbot models")
-from controllers.directional_trading.flyby_candidate import FlybyCandidateController
+from backtest.flyby_candidate import FlybyCandidateController
 from hummingbot.core.data_type.common import TradeType
 from src.signal.return_model import FEATURES, ReturnEstimate
 from tests.test_condor_hummingbot import controller, executor_info

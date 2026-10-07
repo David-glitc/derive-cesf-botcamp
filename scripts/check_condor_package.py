@@ -68,6 +68,8 @@ def validate_package(root=ROOT, condor_root=None):
     expected_paths.update(f"controllers/derive_cesf_long_vol/sample_configs/{m}.yml"
                           for m in ("eth", "btc", "sol", "hype"))
     for path in directory.rglob("*"):
+        if "__pycache__" in path.parts:  # importing the controller in tests writes bytecode
+            continue
         if path.is_symlink() or (path.is_file() and str(path.relative_to(directory)) not in expected_paths):
             raise ValueError("unexpected_or_linked_condor_package_file")
     profile = validate_fixed_profile(directory)
@@ -80,28 +82,34 @@ def validate_package(root=ROOT, condor_root=None):
         raise ValueError("invalid_condor_tools_or_binding")
     loop_meta, loop_body = frontmatter(directory / "loops/flyby_operator/loop.md")
     defaults = loop_meta.get("default_config") if isinstance(loop_meta, dict) else None
+    context = str(loop_meta.get("default_trading_context", "")) if isinstance(loop_meta, dict) else ""
     required_defaults = {"execution_mode": "dry_run", "restart_on_boot": False, "max_ticks": 1,
                          "bot_mode": "bot", "bot_name": "flyby-flyby_operator", "total_amount_quote": 800,
-                         "frequency_sec": 60, "tick_timeout_sec": 60, "canvas_enabled": False,
+                         "frequency_sec": 60, "tick_timeout_sec": 0, "canvas_enabled": False,
                          "server_name": "", "agent_key": ""}
-    limits = {"max_position_size_quote": 160, "max_open_executors": 1, "max_leverage": 2,
+    limits = {"max_position_size_quote": 320, "max_open_executors": 1, "max_leverage": 2,
               "max_drawdown_pct": -1, "shutdown_drawdown_pct": -1}
     if (loop_meta.get("name") != "Flyby Operator" or loop_meta.get("agent_key") is not None
             or loop_meta.get("skills") != [] or not loop_body.strip()
             or not isinstance(defaults, dict) or set(defaults) != set(required_defaults) | {"risk_limits"}
             or any(not exact(defaults.get(k), v) for k, v in required_defaults.items())
             or defaults.get("risk_limits") != limits
-            or PROFILE_ID not in str(loop_meta.get("default_trading_context", ""))
+            or PROFILE_ID not in context or "flyby-eth-active-001" not in context
+            or "flyby-sol-active-001" not in context
             or "agents/condor_agent.py" not in loop_body):
         raise ValueError("invalid_condor_loop_contract")
     controller = directory / "controllers/derive_cesf_long_vol"
     description, _ = frontmatter(controller / "CONTROLLER.md")
     if description.get("type") != "directional_trading":
         raise ValueError("wrong_controller_type")
-    wrapper = controller / "derive_cesf_long_vol.py"
-    tree = ast.parse(wrapper.read_text())
-    if not any(isinstance(n, ast.ImportFrom) and n.module == "controllers.directional_trading.flyby" for n in tree.body):
-        raise ValueError("canonical_controller_import_required")
+    tree = ast.parse((controller / "derive_cesf_long_vol.py").read_text())
+    classes = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
+    if not {"DeriveCesfLongVolConfig", "DeriveCesfLongVolController"} <= classes:
+        raise ValueError("canonical_controller_required")
+    # Condor syncs one file; only the pip-installed shared package may be imported.
+    if any(isinstance(n, ast.ImportFrom) and (n.level or (n.module or "").startswith("controllers"))
+           for n in ast.walk(tree)):
+        raise ValueError("controller_must_be_single_file")
     samples = {}
     for market in ("eth", "btc", "sol", "hype"):
         source = root / f"conf/controllers/conf_flyby_{market}.yml"

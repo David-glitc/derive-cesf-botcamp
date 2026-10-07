@@ -40,7 +40,8 @@ def test_missing_loop_is_a_build_blocker(candidate):
 @pytest.mark.parametrize("key,value", [("execution_mode", "loop"), ("execution_mode", "run_once"),
     ("restart_on_boot", True), ("restart_on_boot", 0), ("bot_mode", "executors"),
     ("bot_name", "unrelated-bot"), ("total_amount_quote", 1600), ("max_ticks", 0),
-    ("frequency_sec", 1), ("server_name", "old-testnet"), ("agent_key", "hardcoded-model")])
+    ("frequency_sec", 1), ("tick_timeout_sec", 60),
+    ("server_name", "old-testnet"), ("agent_key", "hardcoded-model")])
 def test_changed_loop_defaults_are_rejected(candidate, key, value):
     replace_frontmatter(candidate / "condor/flyby/loops/flyby_operator/loop.md",
                         lambda m: m["default_config"].update({key: value}))
@@ -83,6 +84,12 @@ def test_identity_cannot_relax_the_fixed_contract(candidate):
     with pytest.raises(ValueError, match="fixed_submission_profile_mismatch"): validate_package(candidate)
 
 
+def test_loop_must_pin_the_operator_selected_controller_ids(candidate):
+    path = candidate / "condor/flyby/loops/flyby_operator/loop.md"
+    replace_frontmatter(path, lambda m: m.update(default_trading_context="Only ETH"))
+    with pytest.raises(ValueError, match="invalid_condor_loop_contract"): validate_package(candidate)
+
+
 @pytest.mark.parametrize("name", ["loops/flyby_operator/config.yml", "loops/flyby_operator/state.json",
                                   "credentials.yml", "routines/custom.py"])
 def test_runtime_or_unknown_files_cannot_ship(candidate, name):
@@ -103,7 +110,8 @@ def test_install_is_explicit_paused_complete_and_never_overwrites(tmp_path):
     assert verdict["started"] is False and verdict["execution_mode"] == "dry_run"
     source = ROOT / "condor/flyby"
     for path in source.rglob("*"):
-        if path.is_file(): assert (agents / "flyby" / path.relative_to(source)).read_bytes() == path.read_bytes()
+        if path.is_file() and "__pycache__" not in path.parts:
+            assert (agents / "flyby" / path.relative_to(source)).read_bytes() == path.read_bytes()
     sentinel = agents / "flyby/loops/flyby_operator/state.json"
     sentinel.write_text("preserve runtime")
     with pytest.raises(FileExistsError): install(agents)
