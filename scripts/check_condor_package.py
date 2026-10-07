@@ -68,6 +68,8 @@ def validate_package(root=ROOT, condor_root=None):
     expected_paths.update(f"controllers/derive_cesf_long_vol/sample_configs/{m}.yml"
                           for m in ("eth", "btc", "sol", "hype"))
     for path in directory.rglob("*"):
+        if "__pycache__" in path.parts:  # importing the controller in tests writes bytecode
+            continue
         if path.is_symlink() or (path.is_file() and str(path.relative_to(directory)) not in expected_paths):
             raise ValueError("unexpected_or_linked_condor_package_file")
     profile = validate_fixed_profile(directory)
@@ -98,10 +100,14 @@ def validate_package(root=ROOT, condor_root=None):
     description, _ = frontmatter(controller / "CONTROLLER.md")
     if description.get("type") != "directional_trading":
         raise ValueError("wrong_controller_type")
-    wrapper = controller / "derive_cesf_long_vol.py"
-    tree = ast.parse(wrapper.read_text())
-    if not any(isinstance(n, ast.ImportFrom) and n.module == "controllers.directional_trading.flyby" for n in tree.body):
-        raise ValueError("canonical_controller_import_required")
+    tree = ast.parse((controller / "derive_cesf_long_vol.py").read_text())
+    classes = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
+    if not {"DeriveCesfLongVolConfig", "DeriveCesfLongVolController"} <= classes:
+        raise ValueError("canonical_controller_required")
+    # Condor syncs one file; only the pip-installed shared package may be imported.
+    if any(isinstance(n, ast.ImportFrom) and (n.level or (n.module or "").startswith("controllers"))
+           for n in ast.walk(tree)):
+        raise ValueError("controller_must_be_single_file")
     samples = {}
     for market in ("eth", "btc", "sol", "hype"):
         source = root / f"conf/controllers/conf_flyby_{market}.yml"

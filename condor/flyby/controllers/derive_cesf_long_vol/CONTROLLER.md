@@ -5,16 +5,16 @@ description: Mainnet-only Flyby V2 controller; atomic options RFQs require expli
 
 # derive_cesf_long_vol
 
-This registration imports the canonical repository controller after the
-shared package and controller modules are installed into Hummingbot. Use
+This is the canonical Flyby controller, the only copy in the repository.
+Condor syncs this single file; its `agents`/`src` imports need the shared
+package installed into Hummingbot first. Use
 the four paused mainnet profiles in `sample_configs/`, identical to the
 repository's `conf_flyby_*.yml` examples. Hummingbot pairs are BASE-USDC;
 the connector maps them to Derive's BASE-PERP instruments.
-No independent strategy copy is maintained here.
 
 Install shared modules and the explicit reviewed compatibility patch into the
-pinned Hummingbot client before syncing this wrapper. The runtime refuses entry
-without compatibility and fresh authenticated net-margin state. A wrapper-only
+pinned Hummingbot client before syncing this controller. The runtime refuses entry
+without compatibility and fresh authenticated net-margin state. A controller-only
 Condor upload doesn't install dependencies or patch the client.
 
 Keep the launch paused until the operator clears the repository's readiness
@@ -37,7 +37,7 @@ Fresh public context can populate a fee-aware shadow plan; the detailed
 Condor view exposes `options_delta`, never a live hedge authorization.
 Read the [delta evidence](../../../../reports/DELTA_OPTIONS_REPORT.md).
 
-The shared canonical controller also implements paired options execution through
+This controller also implements paired options execution through
 Derive v2 RFQs, not the perpetual executor. Use the separately installed paused
 `conf_flyby_options_eth.yml` OR `conf_flyby_options_btc.yml` after explicit operator
 approval and mainnet verification; don't change the fixed samples silently.

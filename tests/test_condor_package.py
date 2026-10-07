@@ -103,7 +103,8 @@ def test_install_is_explicit_paused_complete_and_never_overwrites(tmp_path):
     assert verdict["started"] is False and verdict["execution_mode"] == "dry_run"
     source = ROOT / "condor/flyby"
     for path in source.rglob("*"):
-        if path.is_file(): assert (agents / "flyby" / path.relative_to(source)).read_bytes() == path.read_bytes()
+        if path.is_file() and "__pycache__" not in path.parts:
+            assert (agents / "flyby" / path.relative_to(source)).read_bytes() == path.read_bytes()
     sentinel = agents / "flyby/loops/flyby_operator/state.json"
     sentinel.write_text("preserve runtime")
     with pytest.raises(FileExistsError): install(agents)

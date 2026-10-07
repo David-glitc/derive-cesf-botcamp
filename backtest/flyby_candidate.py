@@ -4,9 +4,16 @@ The baseline's entry quality, accounts, depth, risk and venue checks are reused.
 Candidate selection never mutates configs or a live executor registry.
 """
 from copy import deepcopy
+from pathlib import Path
+import sys
+
+# The production controller lives only in the Condor agent folder.
+CONTROLLER_DIR = Path(__file__).resolve().parents[1] / "condor/flyby/controllers/derive_cesf_long_vol"
+if str(CONTROLLER_DIR) not in sys.path:
+    sys.path.insert(0, str(CONTROLLER_DIR))
 
 from agents.condor_agent import decide
-from controllers.directional_trading.flyby import DeriveCesfLongVolController
+from derive_cesf_long_vol import DeriveCesfLongVolController
 from hummingbot.core.data_type.common import TradeType
 from hummingbot.strategy_v2.models.executor_actions import StopExecutorAction
 from src.signal.return_model import predict_return, validate_model

@@ -24,7 +24,7 @@ SCRIPTS = ("install_hummingbot.sh", "check_mainnet.py", "hummingbot_compat.py", 
            "prepare_competition_profile.py",
            "prepare_observation_profile.py",
            "capture_derive_public.py", "validate_flyby.py")
-TREES = {"agents": {".py"}, "src": {".py"}, "controllers": {".py"}, "conf": {".yml"},
+TREES = {"agents": {".py"}, "src": {".py"}, "conf": {".yml"},
          "condor": {".md", ".py", ".yml"}, "tests": {".py"}, "verification": {".md", ".py"},
          "reports": {".md"}, "backtest": {".md", ".py"}}
 SECRET_PATTERNS = (

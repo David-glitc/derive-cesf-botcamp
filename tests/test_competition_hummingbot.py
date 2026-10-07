@@ -8,7 +8,7 @@ import yaml
 
 pytest.importorskip("hummingbot", reason="Requires pinned actual controller models")
 from hummingbot.core.data_type.common import TradeType
-from controllers.directional_trading.flyby import DeriveCesfLongVolController, DeriveCesfLongVolConfig
+from derive_cesf_long_vol import DeriveCesfLongVolController, DeriveCesfLongVolConfig
 from tests.test_condor_hummingbot import controller, executor_info
 
 

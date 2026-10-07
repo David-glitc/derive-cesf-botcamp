@@ -21,7 +21,7 @@ def test_curated_bundle_has_runtime_without_operational_state():
     paths = selected_files()
     names = {str(p.relative_to(ROOT)) for p in paths}
     assert {"src/execution/derive_hb.py", "src/accounting/derive_margin.py", "scripts/hummingbot_compat.py",
-            "controllers/directional_trading/flyby.py", "condor/flyby/AGENT.md",
+            "condor/flyby/controllers/derive_cesf_long_vol/derive_cesf_long_vol.py", "condor/flyby/AGENT.md",
             "condor/flyby/PROFILE.yml", "condor/flyby/loops/flyby_operator/loop.md",
             "scripts/install_condor.py", "scripts/verify_condor_runtime.py",
             "src/runtime/control.py", "src/runtime/bridge.py", "src/runtime/condor_adapter.py",

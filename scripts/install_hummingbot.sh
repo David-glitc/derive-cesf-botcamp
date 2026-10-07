@@ -26,8 +26,9 @@ if [[ "$compatibility" == "--with-compatibility" ]]; then
   python "$repo_dir/scripts/hummingbot_compat.py" --hb-dir "$hb_dir" --apply
 fi
 install -d "$hb_dir/controllers/directional_trading" "$hb_dir/conf/controllers" "$hb_dir/conf/scripts"
-install -m 644 "$repo_dir/controllers/directional_trading/flyby.py" "$hb_dir/controllers/directional_trading/flyby.py"
-install -m 644 "$repo_dir/controllers/directional_trading/derive_cesf_long_vol.py" "$hb_dir/controllers/directional_trading/derive_cesf_long_vol.py"
+# Same single file Condor syncs from the agent folder.
+install -m 644 "$repo_dir/condor/flyby/controllers/derive_cesf_long_vol/derive_cesf_long_vol.py" \
+  "$hb_dir/controllers/directional_trading/derive_cesf_long_vol.py"
 for profile in eth btc sol hype; do
   install -m 644 "$repo_dir/conf/controllers/conf_flyby_$profile.yml" "$hb_dir/conf/controllers/conf_flyby_$profile.yml"
 done

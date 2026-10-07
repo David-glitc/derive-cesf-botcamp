@@ -62,7 +62,7 @@ credential stores, or assume a mainnet profile authorizes activation.
 Use the paused `sample_configs/{eth,btc,sol,hype}.yml` shipped with the controller
 registration. Hummingbot pairs are BASE-USDC; Derive instrument names are BASE-PERP.
 Install the shared package and explicit reviewed compatibility patch in the pinned
-client before controller sync. A wrapper-only upload isn't a complete runtime.
+client before controller sync. A controller-only upload isn't a complete runtime.
 Never patch a running client, claim private verification from a source hash, or
 increase risk caps to meet venue minimums. Missing fresh authenticated margin
 keeps entry paused. Report `venue_minimum_exceeds_budget` to the operator.
