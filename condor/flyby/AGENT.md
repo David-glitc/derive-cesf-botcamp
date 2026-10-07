@@ -27,15 +27,17 @@ submission profile is `flyby-baseline-dd15-dd25-v1` in `PROFILE.yml`.
 Run the deterministic controller; don't rewrite its signals or tune its profile.
 An explicit `bounded` runtime extension permits only the reviewed adjustment
 leases in `RUNTIME_OVERSIGHT.md`; never replace this with saved-config edits.
-The loop ships in one-tick `dry_run` mode, which observes a mainnet controller
-without submitting orders. This isn't a paper-trading connector override.
-The team must select a configured model and API server before running it.
+The loop ships in continuous `loop` mode for live Hummingbot controller
+operation. It is not a paper-trading connector override. Installing this package
+does not start the loop or bot. The team must select a configured model and API
+server before running it.
 Tool allowlists restrict pydantic-ai models; upstream ACP models don't enforce
 that allowlist as a sandbox. Never use arbitrary code, delegation or private
 order tools to work around these instructions or the runtime permission gate.
-Upstream also permits design-time saved-config writes in dry runs;
-this agent's playbook forbids them. A dry run
-doesn't provide a complete read-only configuration sandbox.
+For an explicitly selected dry-run diagnostic, keep all tools read-only;
+upstream dry-run mode alone does not sandbox saved configuration writes.
+The continuous live loop uses the exact source/config upload sequence in its
+playbook, preserving the selected controller IDs.
 
 Use Hummingbot's connector/controller tools. Never call a separate private
 Derive order API, expose credentials, or bypass deterministic controller
@@ -59,19 +61,23 @@ The team provides its own mainnet credentials through Hummingbot's encrypted
 configuration. Don't reuse an old testnet account, copy private keys, change
 credential stores, or assume a mainnet profile authorizes activation.
 
-Use the paused `sample_configs/{eth,btc,sol,hype}.yml` shipped with the controller
-registration. Hummingbot pairs are BASE-USDC; Derive instrument names are BASE-PERP.
+The generic `sample_configs/{eth,btc,sol,hype}.yml` remain paused. Only the
+selected `sample_configs/{eth,sol}_active.yml` profiles may be launched by the
+loop. Hummingbot pairs are BASE-USDC; Derive instrument names are BASE-PERP.
 Install the shared package and explicit reviewed compatibility patch in the pinned
 client before controller sync. A controller-only upload isn't a complete runtime.
 Never patch a running client, claim private verification from a source hash, or
 increase risk caps to meet venue minimums. Missing fresh authenticated margin
 keeps entry paused. Report `venue_minimum_exceeds_budget` to the operator.
 
-Keep samples paused until the operator clears the launch gates. Don't start
-or unpause a bot merely to generate competition volume. Use one dedicated
-account and stable controller IDs; never loosen risk settings to recover
-losses. Request operator direction for unknown orders, unmatched exposure,
-failed closes or reconciliation drift. Don't cancel unrelated account orders.
+The four generic samples remain paused. The loop may launch only the separately
+reviewed active ETH and SOL profiles named in its playbook, after authenticated
+account, market, reconciliation and risk-state checks pass. It must run the
+controller only after those checks, not merely to generate volume. Use one
+dedicated account and stable controller IDs;
+never loosen risk settings to recover losses. Request operator direction for
+unknown orders, unmatched exposure, failed closes or reconciliation drift.
+Don't cancel unrelated account orders.
 
 The operator-approved competition risk policy is `flyby-dd15-dd25-v1`.
 At −15% peak-relative drawdown, restricted mode latches: confidence >=0.85,

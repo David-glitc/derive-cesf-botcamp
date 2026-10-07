@@ -1,4 +1,4 @@
-# Fixed submission identity. Operator-selected markets; all samples ship paused.
+# Baseline identity for the four paused samples; the loop selects separate ETH/SOL active samples.
 profile_id: flyby-baseline-dd15-dd25-v1
 agent_slug: flyby
 loop_id: flyby.flyby_operator

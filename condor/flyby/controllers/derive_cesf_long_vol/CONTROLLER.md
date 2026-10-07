@@ -9,7 +9,8 @@ This is the canonical Flyby controller, the only copy in the repository.
 Condor syncs this single file; its `agents`/`src` imports need the shared
 package installed into Hummingbot first. Use
 the four paused mainnet profiles in `sample_configs/`, identical to the
-repository's `conf_flyby_*.yml` examples. Hummingbot pairs are BASE-USDC;
+repository's `conf_flyby_*.yml` examples, plus the separately reviewed active
+ETH/SOL profiles `eth_active.yml` and `sol_active.yml`. Hummingbot pairs are BASE-USDC;
 the connector maps them to Derive's BASE-PERP instruments.
 
 Install shared modules and the explicit reviewed compatibility patch into the
@@ -17,8 +18,10 @@ pinned Hummingbot client before syncing this controller. The runtime refuses ent
 without compatibility and fresh authenticated net-margin state. A controller-only
 Condor upload doesn't install dependencies or patch the client.
 
-Keep the launch paused until the operator clears the repository's readiness
-gates. Only `derive_perpetual` is accepted. Testnet and paper-trading connector
+The active ETH/SOL profiles are available only to the continuous Condor loop,
+which checks account, market, stream and reconciliation readiness before it
+deploys/starts the owned bot. Generic samples remain paused. Only
+`derive_perpetual` is accepted. Testnet and paper-trading connector
 overrides fail validation; a wrong or unknown runtime connector domain emits
 no executor actions. Mainnet uses the stock legacy v2 API, not the public v3
 options-capture endpoint. Follow [mainnet setup](../../../../MAINNET_SETUP.md).

@@ -37,7 +37,7 @@ def install(agents_root, root=ROOT):
         # Don't erase evidence or state after a partial failure. No loop starts.
         raise RuntimeError(f"partial_install_left_in_place:{target}; choose a new root") from None
     return {"installed_agent": str(target), "agent": "flyby", "loop_id": LOOP_ID,
-            "profile_id": PROFILE_ID, "execution_mode": "dry_run", "restart_on_boot": False,
+            "profile_id": PROFILE_ID, "execution_mode": "loop", "restart_on_boot": False,
             "started": False, "orders_submitted": 0, "live_verified": False}
 
 

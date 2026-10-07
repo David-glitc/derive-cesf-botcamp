@@ -20,6 +20,9 @@ Required runtime files:
 - `pyproject.toml` (install shared modules into the execution environment)
 - Selected `conf/controllers/conf_flyby_{eth,btc,sol,hype}.yml`
 - `conf/scripts/conf_v2_flyby.yml`
+- Active ETH/SOL configs in `conf/controllers/conf_flyby_{eth,sol}_active.yml`
+  and `condor/flyby/controllers/derive_cesf_long_vol/sample_configs/{eth,sol}_active.yml`
+- `condor/SYNC_HANDOFF.md` (continuous-loop settings and saved-config overrides)
 - `hummingbot-version.json`, `scripts/hummingbot_compat.py`,
   `scripts/check_mainnet.py` and `scripts/install_hummingbot.sh`
 
@@ -30,6 +33,9 @@ V2 controller itself, not a wrapper. It doesn't create a separate private Derive
 The entrypoint is `condor/flyby/AGENT.md` plus
 `condor/flyby/loops/flyby_operator/loop.md`, not the Python policy alone.
 The fixed identity is `flyby-baseline-dd15-dd25-v1` in `condor/flyby/PROFILE.yml`.
+The default loop is continuous (`execution_mode: loop`, `max_ticks: 0`) and may
+deploy only the selected active ETH/SOL profiles under their exact IDs. See the
+[sync handoff](condor/SYNC_HANDOFF.md) for the team's launch configuration.
 Follow [Condor installation](condor/INSTALL.md): `scripts/install_condor.py`
 copies authored files into an explicit new `flyby` agent home without starting
 a loop or replacing the coordinator. The ZIP includes these files; a GitHub

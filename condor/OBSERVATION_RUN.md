@@ -59,7 +59,8 @@ doesn't verify provider connectivity or authorize model spending.
 The checked-in [override template](profiles/flyby_observe_48h.yml) uses native
 `execution_mode: loop`, `max_ticks: 0`, a 60-second sleep, a 30-second whole-tick
 cancellation timeout and `restart_on_boot: false`. The default discovered loop
-still has its original one-tick dry-run configuration.
+now defaults to continuous live controller operation. This read-only procedure
+therefore requires its explicit observation override and launcher.
 
 ## Inspect completion and failures
 

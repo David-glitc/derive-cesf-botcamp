@@ -26,7 +26,7 @@ def replace_frontmatter(path, change):
     path.write_text("---\n" + yaml.safe_dump(values, sort_keys=False) + "---\n" + body)
 
 
-def test_package_has_an_explicit_paused_profile_and_loop():
+def test_package_has_a_continuous_live_operator_loop():
     verdict = validate_package()
     assert verdict["loop_id"] == LOOP_ID and verdict["profile_id"] == PROFILE_ID
     assert verdict["tick_verified"] is False and verdict["orders_submitted"] == 0
@@ -37,9 +37,9 @@ def test_missing_loop_is_a_build_blocker(candidate):
     with pytest.raises(FileNotFoundError): validate_package(candidate)
 
 
-@pytest.mark.parametrize("key,value", [("execution_mode", "loop"), ("execution_mode", "run_once"),
+@pytest.mark.parametrize("key,value", [("execution_mode", "dry_run"), ("execution_mode", "run_once"),
     ("restart_on_boot", True), ("restart_on_boot", 0), ("bot_mode", "executors"),
-    ("bot_name", "unrelated-bot"), ("total_amount_quote", 1600), ("max_ticks", 0),
+    ("bot_name", "unrelated-bot"), ("total_amount_quote", 1600), ("max_ticks", 1),
     ("frequency_sec", 1), ("tick_timeout_sec", 60),
     ("server_name", "old-testnet"), ("agent_key", "hardcoded-model")])
 def test_changed_loop_defaults_are_rejected(candidate, key, value):
@@ -90,6 +90,25 @@ def test_loop_must_pin_the_operator_selected_controller_ids(candidate):
     with pytest.raises(ValueError, match="invalid_condor_loop_contract"): validate_package(candidate)
 
 
+def test_active_profiles_are_included_and_match_operator_configs(candidate):
+    verdict = validate_package(candidate)
+    assert set(verdict["active_samples"]) == {"eth", "sol"}
+    path = candidate / "condor/flyby/controllers/derive_cesf_long_vol/sample_configs/eth_active.yml"
+    profile = yaml.safe_load(path.read_text())
+    profile["id"] = "unreviewed-id"
+    path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(ValueError, match="condor_active_sample_drift:eth"): validate_package(candidate)
+
+
+def test_matching_active_configs_cannot_silently_raise_risk(candidate):
+    for path in (candidate / "conf/controllers/conf_flyby_eth_active.yml",
+                 candidate / "condor/flyby/controllers/derive_cesf_long_vol/sample_configs/eth_active.yml"):
+        profile = yaml.safe_load(path.read_text())
+        profile["risk_fraction"] = .01
+        path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(ValueError, match="invalid_condor_active_sample:eth"): validate_package(candidate)
+
+
 @pytest.mark.parametrize("name", ["loops/flyby_operator/config.yml", "loops/flyby_operator/state.json",
                                   "credentials.yml", "routines/custom.py"])
 def test_runtime_or_unknown_files_cannot_ship(candidate, name):
@@ -104,10 +123,10 @@ def test_authored_symlink_is_rejected(candidate):
     with pytest.raises(ValueError, match="unexpected_or_linked"): validate_package(candidate)
 
 
-def test_install_is_explicit_paused_complete_and_never_overwrites(tmp_path):
+def test_install_is_explicit_live_loop_complete_and_never_starts_or_overwrites(tmp_path):
     agents = tmp_path / "agents"
     verdict = install(agents)
-    assert verdict["started"] is False and verdict["execution_mode"] == "dry_run"
+    assert verdict["started"] is False and verdict["execution_mode"] == "loop"
     source = ROOT / "condor/flyby"
     for path in source.rglob("*"):
         if path.is_file() and "__pycache__" not in path.parts:

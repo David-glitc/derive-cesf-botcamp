@@ -6,12 +6,17 @@ The team chooses the enabled markets and account universe.
 
 Fixed submission identity: `flyby-baseline-dd15-dd25-v1`. Condor discovers agent
 `flyby` and explicit loop `flyby.flyby_operator`; see the
-[Condor installation guide](condor/INSTALL.md). All samples remain paused.
+[Condor installation guide](condor/INSTALL.md). The loop now defaults to
+continuous controller operation with the reviewed ETH/SOL active profiles;
+the four generic baseline samples remain paused. Use the
+[team sync handoff](condor/SYNC_HANDOFF.md) to override old saved dry-run settings.
 The [final Condor verification report](reports/CONDOR_FINAL_VERIFICATION.md)
 records discovery/tick/install evidence and the remaining production gates.
 
-**Current verdict: not cleared for live trading.** Contract tests pass in
-Hummingbot v2.17.0, but stress replay remains negative after risk mitigations.
+**Current verification:** continuous loop/discovery and offline controller
+checks pass; deployed exchange fills for this package remain unverified.
+Contract tests pass in Hummingbot v2.17.0, but stress replay remains negative
+after risk mitigations.
 Default profiles keep option spreads in shadow mode. A separately configured
 [atomic RFQ lane](OPTIONS_EXECUTION.md) implements entry, paired exits and durable
 recovery; mainnet option fills remain unverified. Read the
@@ -41,7 +46,7 @@ samples and not evidence of a profitable adaptive strategy.
 | V2 controller | [derive_cesf_long_vol.py](condor/flyby/controllers/derive_cesf_long_vol/derive_cesf_long_vol.py) | Account/book gates, bounded sizing, executor actions; the single file Condor syncs |
 | Condor policy | [condor_agent.py](agents/condor_agent.py) | Shared deterministic price/volume decision |
 | Condor identity | [agent package](condor/flyby/AGENT.md) | Operator workflow; cannot override risk gates |
-| Condor loop | [loop.md](condor/flyby/loops/flyby_operator/loop.md) | Controller-mode playbook; one dry-run tick by default |
+| Condor loop | [loop.md](condor/flyby/loops/flyby_operator/loop.md) | Continuous live controller loop; exact ETH/SOL launch and owned-bot oversight |
 | Fixed profile | [PROFILE.yml](condor/flyby/PROFILE.yml) | Machine-checked baseline and risk identity |
 | Features | [signal module](src/signal/flyby.py) | Closed-bar, causal, timeframe-aware indicators |
 | Risk | [position sizing](src/risk/position_sizing.py) | Exposure, drawdown scaling, costs and executable depth |

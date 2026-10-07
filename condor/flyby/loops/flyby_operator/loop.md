@@ -1,6 +1,6 @@
 ---
 name: Flyby Operator
-description: Operate the fixed Flyby baseline controller; observe and journal risk and execution health
+description: Continuously operate the selected Flyby Hummingbot controller and journal risk and execution health
 agent_key: null
 skills: []
 default_config:
@@ -9,8 +9,8 @@ default_config:
   total_amount_quote: 800
   frequency_sec: 60
   tick_timeout_sec: 0
-  execution_mode: dry_run
-  max_ticks: 1
+  execution_mode: loop
+  max_ticks: 0
   restart_on_boot: false
   bot_mode: bot
   bot_name: flyby-flyby_operator
@@ -25,37 +25,75 @@ default_trading_context: >-
   Fixed profile flyby-baseline-dd15-dd25-v1. The operator-selected active profiles
   are ETH flyby-eth-active-001 and SOL flyby-sol-active-001, from
   conf_flyby_eth_active.yml and conf_flyby_sol_active.yml, sharing the
-  flyby-competition $800 risk state. This names the intended profiles; it does
-  not prove they are registered on the selected Hummingbot API server. Paused
-  until the operator clears production launch gates. No independent orders or
-  profile tuning.
+  flyby-competition $800 risk state. The loop is configured for continuous live
+  controller operation; installing this package does not start it. It may manage
+  only flyby-flyby_operator with these exact profile files. No independent orders
+  or profile tuning.
 ---
 
 # Flyby operator tick
 
-Operate only `flyby-flyby_operator`, or the operator's explicitly declared owned
-bot. Never adopt or modify an unrelated bot. `agents/condor_agent.py` is the
+Operate only `flyby-flyby_operator`. Never adopt or modify an unrelated bot.
+`agents/condor_agent.py` is the
 shared deterministic policy imported by the Hummingbot controller, not a CLI
 entrypoint or another order sender. This playbook wraps that controller with
 Condor oversight; the LLM doesn't independently call `decide()` to place trades.
 
-## Every tick
+## First tick: prepare and launch the owned controller bot
+
+Starting this loop in `execution_mode: loop` authorizes the exact controller
+launch below. Act within that scope; do not wait for another per-tick approval.
+Read the configured account and prepared Hummingbot image from the team's
+session context. Use those exact values; do not invent an account or silently
+fall back to `hummingbot/hummingbot:latest` without the installed shared package.
+
+1. Read `manage_bots(action="status")` and the provided account/connector state.
+   If the owned bot exists, inspect `get_config` and proceed to ongoing ticks;
+   do not redeploy it. Report unknown positions/orders or account mismatch.
+2. Read `manage_agent_controllers(action="status", agent="flyby",
+   name="derive_cesf_long_vol")`. Sync a missing source with
+   `action="sync", overwrite=false`. If there is source drift, read its
+   preview/impact before syncing the reviewed folder copy with `overwrite=true`.
+   Do not overwrite a source used by an unrelated running bot, or restart a
+   running bot to apply new source. Report an unreachable API or unresolved drift.
+3. Use `manage_agent_controllers(action="upload_config", agent="flyby",
+   name="derive_cesf_long_vol", sample="eth_active",
+   config_name="flyby-eth-active-001", overwrite=false)` and the same call for
+   `sample="sol_active", config_name="flyby-sol-active-001"`. The explicit
+   `config_name` preserves the sample's controller ID; do not use the generated
+   `derive_cesf_long_vol__<sample>` name. Re-read both saved configs with
+   `manage_controllers(action="describe", config_name=...)` and compare them
+   against the packaged active samples. If an existing config differs, report
+   `controller_config_mismatch`; do not rewrite its risk settings.
+4. When account/connector state is authenticated and exposure is reconciled,
+   deploy `flyby-flyby_operator` with
+   `controllers_config=["flyby-eth-active-001", "flyby-sol-active-001"]`, the
+   team's explicit `account_name` and prepared `image`, and
+   `max_global_drawdown_quote=200`. This is the $800 allocation's 25% absolute
+   loss backstop; the controller retains its peak-relative −15%/−25% latches.
+   No additional per-controller platform drawdown cap is introduced.
+5. Re-read status, the owned bot's config and logs. Report the actual deployment
+   result. Controller context/checkpoint/stream readiness is checked after the
+   controller starts; absence before deployment is not a circular launch gate.
+   The deterministic controller itself blocks entries until its full checks pass.
+
+## Ongoing ticks
 
 1. Read `manage_bots(action="status")`, the owned bot's
    `manage_bots(action="get_config", bot_name="flyby-flyby_operator")`, and
    the registered controller configs. The only selected controller IDs are
    `flyby-eth-active-001` and `flyby-sol-active-001`, both using
    `derive_cesf_long_vol`; never substitute `flyby_hedge.py`, `flybyderive.py`
-   or an unrelated controller. If either selected ID is absent or its config
-   differs from the matching active profile, report `controller_not_registered`
-   and do not deploy or trade. If no owned bot/session exists, report
-   `not_deployed`; don't invent status or deploy from the default dry run.
-   Check registered configs against the active profile files and shared
-   `risk_state_id`. A separately operator-approved RFQ profile differs
+   or an unrelated controller. Verify the exact active configs and shared
+   `risk_state_id`. If the owned bot was never deployed, follow the first-tick
+   sequence. If a previously running bot disappears or stops, report its state;
+   do not automatically restart it or reset a risk latch.
+   A separately operator-approved RFQ profile differs
    only in its two options execution settings; check `OPTIONS_EXECUTION.md`
    rather than silently treating that extension as the default baseline.
-   The team installs the complete shared Python package
-   and controller in the pinned Hummingbot environment before controller sync.
+   The team must install the complete shared Python package and controller in
+   Hummingbot before this loop is started; this repository installer does not
+   start the loop or bot.
 2. Read `custom_info.flyby` and, only when mounted read-only, its allowlisted
    detailed context. Check context/decision age, stream readiness, authenticated
    margin, reconciliation, venue minimums and risk checkpoint health. Missing
@@ -81,11 +119,14 @@ Condor oversight; the LLM doesn't independently call `decide()` to place trades.
 6. Journal profile ID, market, signal/rejection, context age, risk mode, remaining
    loss buffer, positions/orders, fees/funding, net P&L and turnover separately.
    Mark missing values unknown. Finish with one explicit verdict:
-   `OBSERVE`, `HOLD_UNVERIFIED`, `RESTRICTED` or `HARD_STOP` and its reason.
+   `RUNNING`, `WARMING_UP`, `HOLD_SIGNAL`, `HOLD_UNVERIFIED`, `RESTRICTED` or
+   `HARD_STOP` and its reason. `RUNNING` means the controller is running; only
+   exchange acknowledgements/fills count as orders/trades. Do not label a live
+   controller tick `OBSERVE (not_deployed)` after successful deployment.
 
 ## Explicit bounded runtime extension
 
-The fixed default above remains observation-only. An operator-approved separate
+The fixed default above is the live controller loop. An operator-approved separate
 runtime profile and explicit runtime launcher may mount the tools documented in
 `RUNTIME_OVERSIGHT.md`. Check their presence; never assume a Python adapter file
 means these tools are installed in this Condor process.
@@ -113,25 +154,20 @@ continue. Don't change caps, cooldown, risk IDs, budget or loss latches. Options
 TP/hold remain fixed and exits stay paired. Runtime tuning is unpromoted research,
 not permission to activate trading or claim a $5-per-trade edge.
 
-## Default execution and failures
+## Live execution and failures
 
-The shipped `dry_run` permits observation only. Don't deploy, update, start,
-stop or upsert anything. End with “No executors were created (dry run)”.
-This is an agent instruction, not a complete configuration sandbox: upstream's
-permission gate still allows saved-config writes.
-Never invoke those in this loop's dry run. Do not use raw config upsert in live
-mode either: its tool can rewrite controller IDs to config names. Preserve the
-selected sample's ID and checkpoint ownership through the approved install.
-The team must configure its accessible API server/model and inspect
-`COMPETITION_READINESS.md` before it explicitly chooses any live mode.
-Installation, dry-run success and this playbook are not launch approval.
+This loop is configured for live Hummingbot controller management, not `dry_run`.
+Its authorized trading path is exclusively the deterministic
+`derive_cesf_long_vol` controller using the two exact profiles above. The LLM
+must never submit raw/private Derive orders, create independent executors, or
+change signals, caps, IDs, budget, leverage, or risk latches.
 
-In an explicitly approved live controller-mode session, deploy only the exact
-operator-selected controller/profile and owned bot; any activation or restart
-still requires that launch's documented approval. Don't retune signals, caps,
-IDs or budget. For a failed tool request, retry a read once, then journal and
-notify the operator. For unknown exposure, failed close, drift, stale margin or
-unhealthy stream, stop proposing entries and report the blocker. Never stop the
-whole bot while it still needs to execute protective closes; verify positions
-and orders are flat before any approved shutdown/restart. No automatic restart
-or kill-switch reset is authorized by this playbook.
+Before first deployment, require the team's installed runtime, correct mainnet
+connector, authenticated account and reconciled exposure with no unknown
+positions/orders. The controller then verifies its margin, streams and risk
+checkpoint before entry; journal its warm-up/blockers while it initializes.
+For unknown exposure, failed close,
+drift, stale margin or unhealthy stream, hold new entries and report; controller
+protective exits remain active. Never stop the whole bot while it needs to
+protectively close positions. No automatic restart or kill-switch reset is
+authorized. Installation copies files only and never starts the loop or bot.

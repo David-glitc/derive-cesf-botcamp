@@ -14,6 +14,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from src.risk.competition import POLICY, RESTRICTED_DRAWDOWN, HARD_STOP_DRAWDOWN
+from src.risk.exposure import ETH_EXPOSURE_TEST
 from src.runtime.control import TOOLS as RUNTIME_TOOLS
 
 PROFILE_ID = "flyby-baseline-dd15-dd25-v1"
@@ -67,6 +68,8 @@ def validate_package(root=ROOT, condor_root=None):
                       "controllers/derive_cesf_long_vol/derive_cesf_long_vol.py"}
     expected_paths.update(f"controllers/derive_cesf_long_vol/sample_configs/{m}.yml"
                           for m in ("eth", "btc", "sol", "hype"))
+    expected_paths.update(f"controllers/derive_cesf_long_vol/sample_configs/{m}_active.yml"
+                          for m in ("eth", "sol"))
     for path in directory.rglob("*"):
         if "__pycache__" in path.parts:  # importing the controller in tests writes bytecode
             continue
@@ -83,7 +86,7 @@ def validate_package(root=ROOT, condor_root=None):
     loop_meta, loop_body = frontmatter(directory / "loops/flyby_operator/loop.md")
     defaults = loop_meta.get("default_config") if isinstance(loop_meta, dict) else None
     context = str(loop_meta.get("default_trading_context", "")) if isinstance(loop_meta, dict) else ""
-    required_defaults = {"execution_mode": "dry_run", "restart_on_boot": False, "max_ticks": 1,
+    required_defaults = {"execution_mode": "loop", "restart_on_boot": False, "max_ticks": 0,
                          "bot_mode": "bot", "bot_name": "flyby-flyby_operator", "total_amount_quote": 800,
                          "frequency_sec": 60, "tick_timeout_sec": 0, "canvas_enabled": False,
                          "server_name": "", "agent_key": ""}
@@ -130,6 +133,23 @@ def validate_package(root=ROOT, condor_root=None):
                 or sample.get("candles_trading_pair") != market.upper() + "-USDT"):
             raise ValueError(f"fixed_controller_profile_mismatch:{market}")
         samples[market] = hashlib.sha256(target.read_bytes()).hexdigest()
+    active_samples = {}
+    for market in ("eth", "sol"):
+        source = root / f"conf/controllers/conf_flyby_{market}_active.yml"
+        target = controller / f"sample_configs/{market}_active.yml"
+        if source.read_bytes() != target.read_bytes():
+            raise ValueError(f"condor_active_sample_drift:{market}")
+        active = yaml.safe_load(target.read_text())
+        expected = {**FIXED_SETTINGS, "manual_kill_switch": False,
+                    "id": f"flyby-{market}-active-001", "trading_pair": market.upper() + "-USDC",
+                    "candles_connector": "binance_perpetual", "candles_trading_pair": market.upper() + "-USDT"}
+        if market == "eth":
+            expected.update(exposure_profile=ETH_EXPOSURE_TEST, max_notional_fraction=.40,
+                            max_gross_exposure_fraction=.40, option_gross_fraction=.75)
+        if (not isinstance(active, dict) or set(active) != set(expected)
+                or any(not exact(active.get(k), v) for k, v in expected.items())):
+            raise ValueError(f"invalid_condor_active_sample:{market}")
+        active_samples[market] = hashlib.sha256(target.read_bytes()).hexdigest()
     upstream = False
     if condor_root is not None:
         # Local official checkout, filesystem helpers only. No config/server/tool calls.
@@ -143,10 +163,12 @@ def validate_package(root=ROOT, condor_root=None):
         if actual_meta != meta or actual_body.strip() != body.strip():
             raise ValueError("upstream_identity_parser_mismatch")
         discovered = _load_one(controller, "agent:flyby", False)
-        if not discovered or discovered.controller_type != "directional_trading" or set(discovered.samples) != set(samples):
+        expected_sample_names = set(samples) | {"eth_active", "sol_active"}
+        if (not discovered or discovered.controller_type != "directional_trading"
+                or set(discovered.samples) != expected_sample_names):
             raise ValueError("upstream_controller_discovery_mismatch")
-        for market in samples:
-            load_sample(discovered, market)
+        for sample_name in expected_sample_names:
+            load_sample(discovered, sample_name)
         # Real registry lookup against isolated roots; don't touch deployed agents.
         with tempfile.TemporaryDirectory(prefix="flyby-condor-discovery-") as temporary:
             with patch.dict(os.environ, {"CONDOR_STOCK_AGENTS_ROOT": str(directory.parent.resolve()),
@@ -161,11 +183,13 @@ def validate_package(root=ROOT, condor_root=None):
                 if strategy is None or strategy.default_config != defaults:
                     raise ValueError("upstream_loop_defaults_mismatch")
                 config = AgentConfig.from_dict(defaults)
-                if config.execution_mode != "dry_run" or config.bot_mode != "bot":
+                if config.execution_mode != "loop" or config.max_ticks != 0 or config.bot_mode != "bot":
                     raise ValueError("upstream_loop_config_mismatch")
         upstream = True
     return {"agent": "flyby", "controller": "derive_cesf_long_vol", "samples": samples,
+            "active_samples": active_samples,
             "profile_id": profile["profile_id"], "loop_id": LOOP_ID,
+            "execution_mode": defaults["execution_mode"], "max_ticks": defaults["max_ticks"],
             "structure_valid": True, "upstream_filesystem_parser_verified": upstream,
             "upstream_agent_loop_discovery_verified": upstream,
             "upstream_agent_config_verified": upstream,
