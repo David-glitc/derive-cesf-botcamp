@@ -49,13 +49,19 @@ paper-trading runtime overrides, even if requested through another agent.
 The selected runtime uses Derive V3 at `https://api.derive.xyz/v3` on the
 Hummingbot V2 controller framework. Install the reviewed V3 connector/signing
 overlay; don't merely swap URLs or use an unreviewed local signer routine.
-Check `processed_data.execution_environment` and run the read-only
-`scripts/check_mainnet.py` preflight in the team's Hummingbot environment.
+Check `processed_data.execution_environment` after startup. The team runs the
+read-only `scripts/check_mainnet.py` preflight in its Hummingbot environment;
+don't wait for an unavailable shell/code tool in this Condor seat to run it.
 An endpoint match doesn't prove private account connectivity or real fills.
 
-Before launching, inspect the current readiness verdict, selected market
-profiles, available balances, positions, orders, trading rules and stream
-health. The selected live profiles are ETH and SOL only. BTC/HYPE are unselected
+Before launching, resolve the selected account, its configured mainnet
+credentials, the prepared runtime and the exact controller configs. Do not
+require a running connector's private snapshot, stream, checkpoint or detailed
+context before its first deployment: the controller checks those after startup
+and cannot enter without them. Report actual conflicting exposure or ownership;
+never interpret unknown data as zero risk.
+
+The selected live profiles are ETH and SOL only. BTC/HYPE are unselected
 paused reference samples; do not run old configs alongside the active IDs.
 The operator chooses the account universe. Don't enable all four by default.
 The team provides its own mainnet credentials through Hummingbot's encrypted
@@ -71,12 +77,13 @@ Never patch a running client, claim private verification from a source hash, or
 increase risk caps to meet venue minimums. Missing fresh authenticated margin
 keeps entry paused. Report `venue_minimum_exceeds_budget` to the operator.
 
-The four generic samples remain paused. The loop may launch only the separately
-reviewed active ETH and SOL profiles named in its playbook, after authenticated
-account, market, reconciliation and risk-state checks pass. It must run the
-controller only after those checks, not merely to generate volume. Use one
-dedicated account and stable controller IDs;
-never loosen risk settings to recover losses. Request operator direction for
+The four generic samples remain paused. The loop may launch only the reviewed
+active ETH and SOL profiles named in its playbook. Starting this live loop
+authorizes that scoped deployment, not independent orders or additional markets.
+The deterministic controller owns the authenticated margin, market, reconciliation
+and risk-state entry checks; report its warm-up rather than waiting for
+pre-deployment controller context. Use one dedicated account and stable controller IDs.
+Never loosen risk settings to recover losses. Request operator direction for
 unknown orders, unmatched exposure, failed closes or reconciliation drift.
 Don't cancel unrelated account orders.
 
@@ -99,11 +106,10 @@ on competitors, not volume alone; no local replay establishes a winning score.
 
 The canonical V2 controller imports `agents.condor_agent.decide` directly.
 Never recreate its policy in an LLM prompt or deploy independent per-leg
-option executors. The canonical controller now has an opt-in atomic v2 RFQ
-lifecycle. Keep the existing four samples unchanged; use a separate paused
-`conf_flyby_options_eth.yml` OR `conf_flyby_options_btc.yml` only after the
-operator approves this execution lane and verifies its mainnet account.
-Never unpause it because an offline test passed. Follow `OPTIONS_EXECUTION.md`.
+option executors. The selected ETH active profile enables its atomic V3 RFQ
+lifecycle; SOL trades perps only. Keep the four paused reference samples unchanged.
+The separately paused options-only examples are not this loop's launch profiles.
+Do not reinterpret selected ETH options as shadow-only. Follow `OPTIONS_EXECUTION.md`.
 
 Inspect `options_delta` in the detailed context: signed underlying delta,
 dollar delta, gross reference exposure, bought/sold moneyness, freshness,
@@ -117,6 +123,15 @@ Read `reports/DELTA_OPTIONS_REPORT.md` for the sizing and replay evidence.
 targets, never minimum-return promises, sizing inputs or reasons to unpause.
 The future 1.5x competitor-return comparison needs audited competitor code
 and comparable data; don't fabricate a peer forecast or winning score.
+
+Missing research reports, optional `flyby_*` tools, mounted advisory context or
+dashboard metrics do not prevent stock controller startup. Historical simulation
+results are not an additional permission gate, even when they are negative.
+Report them honestly; never promise profitable trades.
+Treat successful/idempotent native source and sample uploads as validation;
+extra API defaults, metadata or enum formatting alone are not config drift.
+Actual upload errors, differing risk/ownership settings or native permission
+refusals remain blockers and must include the exact reason.
 
 For options readiness, inspect `processed_data.options_execution`. The selected
 ETH active profile enables V3 atomic spreads; SOL has no options execution lane.
@@ -153,5 +168,6 @@ returns or permission to trade. Paired model proofs do not verify a live
 transport or the stock connector. Never enable options because SMT tests pass.
 
 Report net fees/funding, drawdown, trades, stream age and rejected entries.
-Separate historical/synthetic results from real fills. The current stress
-campaign is negative, so don't describe Flyby as profitable or live-ready.
+Separate historical/synthetic results from real fills. Historical stress results
+do not establish profitability. A running controller is not proof of fills;
+verify account connectivity and actual exchange executions.

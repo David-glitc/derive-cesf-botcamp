@@ -109,6 +109,17 @@ def test_matching_active_configs_cannot_silently_raise_risk(candidate):
     with pytest.raises(ValueError, match="invalid_condor_active_sample:eth"): validate_package(candidate)
 
 
+@pytest.mark.parametrize("value", [True, {}, {"activation_price": .01}])
+def test_explicit_null_trailing_stop_cannot_enable_an_unreviewed_barrier(candidate, value):
+    for path in (candidate / "conf/controllers/conf_flyby_eth_active.yml",
+                 candidate / "condor/flyby/controllers/derive_cesf_long_vol/sample_configs/eth_active.yml"):
+        profile = yaml.safe_load(path.read_text())
+        profile["trailing_stop"] = value
+        path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(ValueError, match="invalid_condor_active_sample:eth"):
+        validate_package(candidate)
+
+
 @pytest.mark.parametrize("name", ["loops/flyby_operator/config.yml", "loops/flyby_operator/state.json",
                                   "credentials.yml", "routines/custom.py"])
 def test_runtime_or_unknown_files_cannot_ship(candidate, name):

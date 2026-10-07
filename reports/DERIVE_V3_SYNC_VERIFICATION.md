@@ -48,3 +48,35 @@ Do not update a fleet image or restart an exposed bot as a source-only sync.
 
 Follow [the team handoff](../condor/SYNC_HANDOFF.md) and
 [mainnet setup](../MAINNET_SETUP.md) for the attended rollout.
+
+## Follow-up local controller-blocker fix — 7 October 2026
+
+The operator confirmed there was no team-side error to diagnose. These findings
+are reproduced local integration defects, not a diagnosis of a deployed account.
+
+- A real HB `OrderBook` advances `snapshot_uid` on full snapshots while
+  `last_diff_uid` remains zero. Flyby's diff-only freshness gate could therefore
+  reject Derive's continuously updating full-book feed indefinitely. The fix
+  accepts a matching native publication timestamp and full-snapshot ID; stale,
+  future, missing and mismatched publications still block entries.
+- Condor's actual `_validate_config_against_template` treats a None-default
+  `trailing_stop` as required. Both active configs and their matching samples
+  now explicitly supply `trailing_stop: null`, without enabling trailing stops.
+- The playbook separates deployment prerequisites from controller-owned entry
+  checks, removes contradictory paused-V2-options instructions and treats
+  advisory reports/context mounts as nonblocking diagnostics.
+
+Baseline regressions: 5 failed, 6 passed before the implementation. After the
+fixes, the network-disabled pinned-image changed-surface suite passed 289 tests
+with 7 upstream deprecation warnings. It includes the real Condor template check,
+an offline bounded executor proposal from a valid snapshot/signal, options signer
+and lifecycle tests, risk/checkpoint tests, runtime oversight, package parity,
+mainnet preflight, and submission hash/secret checks. The full historical suite
+was not rerun for this follow-up.
+
+Official Condor discovery and two mocked live-mode engine ticks also passed;
+deployment permission was checked but no deployment was executed. No exchange
+or model network requests, real orders or service starts occurred. Exposure,
+fees, signal thresholds, private-stream/book ages and −15%/−25% rules are unchanged.
+The team still needs an attended source/config sync and reload to adopt this
+local patch. This is not proof of production fills or positive returns.

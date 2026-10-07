@@ -5,6 +5,22 @@ Installation starts nothing. The team chooses its account, model, server and
 prepared image, then starts the loop. A successful source sync alone is not
 trading evidence.
 
+## False-blocker fixes
+
+Sync the controller source as well as the active YAMLs. Derive sends full books;
+the controller now follows their matching timestamp and `snapshot_uid` instead
+of waiting indefinitely for `last_diff_uid` to change. Both active samples include
+`trailing_stop: null`, required by Condor's template check even though Hummingbot
+accepts its omitted default. This does not enable trailing stops.
+
+The playbook no longer requires post-start connector/stream/checkpoint data
+before first deployment. Those checks remain mandatory inside the controller
+before entry. Optional reports, context mounts and runtime tools do not block
+stock startup. Native successful/idempotent uploads are sufficient; metadata or
+serialization differences alone are not an additional mismatch gate.
+Actual risk/ownership differences and native permission refusals still block.
+No fee, freshness, exposure or drawdown limit has been widened.
+
 ## Selected configuration
 
 Use Hummingbot V2 controllers with Derive V3 authentication, signing and schemas.
@@ -116,7 +132,9 @@ Do not select `flyby_observe_48h.yml`: observation produces no trading volume.
 ## Exact deployment envelope
 
 Upload `eth_active` and `sol_active` using their exact config IDs above.
-Describe the saved configs and compare them with the samples before deployment.
+Accept a native successful/idempotent upload, then inspect the effective saved
+settings if needed. Do not reject extra schema defaults or display metadata as
+profile drift.
 Do not silently overwrite mismatches or use generated IDs that change ownership.
 If the same active IDs still contain the prior release's disabled options or
 one-position settings, the team must back up and explicitly replace those saved
@@ -126,7 +144,7 @@ The loop reports mismatches rather than guessing an overwrite. Already running
 clients retain imported code: reconcile and reach a safely flat state before
 an attended prepared-image replacement, preserving their `data/` volume.
 
-After the team's mainnet/account/image and existing-exposure checks pass,
+After the team's runtime, configured mainnet account and ownership checks pass,
 Hummingbot API `POST /bot-orchestration/deploy-v2-controllers` takes this body.
 The account and image strings below are placeholders, not defaults:
 
@@ -151,3 +169,6 @@ The API can append a timestamp to the instance name. Resolve the returned actual
 instance; do not mistake it for a missing bot and redeploy. Confirm authenticated
 portfolio state, streams, controller reasons and actual exchange fills after
 launch. Source sync, signing and successful tool calls are not fill evidence.
+Controller private-state and stream checks can complete only after startup;
+do not wait for nonexistent pre-deployment controller context. Entries remain
+blocked until the deterministic controller verifies them.

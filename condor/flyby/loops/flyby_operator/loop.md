@@ -61,11 +61,15 @@ fall back to `hummingbot/hummingbot:latest` without the installed shared package
    config_name="flyby-eth-active-001", overwrite=false)` and the same call for
    `sample="sol_active", config_name="flyby-sol-active-001"`. The explicit
    `config_name` preserves the sample's controller ID; do not use the generated
-   `derive_cesf_long_vol__<sample>` name. Re-read both saved configs with
-   `manage_controllers(action="describe", config_name=...)` and compare them
-   against the packaged active samples. If an existing config differs, report
-   `controller_config_mismatch`; do not rewrite its risk settings.
-4. When account/connector state is authenticated and exposure is reconciled,
+   `derive_cesf_long_vol__<sample>` name. A successful upload or idempotent
+   "already matches" response satisfies sample validation. For further
+   inspection use `manage_controllers(action="describe", config_name=...)`;
+   compare effective trading/risk settings, not byte-for-byte YAML or display
+   metadata. The active samples explicitly supply `trailing_stop: null` for
+   Condor's template validator. If upload fails, report its exact reason/diff;
+   do not silently overwrite an existing different risk configuration.
+4. When the selected server, saved configs, team's mainnet credentials profile
+   and prepared runtime are identified, with no known account/ownership conflict,
    deploy `flyby-flyby_operator` with
    `controllers_config=["flyby-eth-active-001", "flyby-sol-active-001"]`, the
    team's explicit `account_name` and prepared `image`, and
@@ -76,8 +80,10 @@ fall back to `hummingbot/hummingbot:latest` without the installed shared package
 5. Re-read status, the owned bot's config and logs. Report the actual deployment
    result. Resolve the actual returned instance, including any API-added timestamp
    suffix, before status checks; never redeploy because the base name differs.
-   Controller context/checkpoint/stream readiness is checked after the
-   controller starts; absence before deployment is not a circular launch gate.
+   Authentication, full margin, controller context/checkpoint/stream readiness
+   are checked after the controller starts; their absence before deployment is
+   not a circular launch gate. Missing research reports, optional tools or
+   context mounts are diagnostics, not extra launch requirements.
    The deterministic controller itself blocks entries until its full checks pass.
 
 ## Ongoing ticks
@@ -91,9 +97,9 @@ fall back to `hummingbot/hummingbot:latest` without the installed shared package
    `risk_state_id`. If the owned bot was never deployed, follow the first-tick
    sequence. If a previously running bot disappears or stops, report its state;
    do not automatically restart it or reset a risk latch.
-   A separately operator-approved RFQ profile differs
-   only in its two options execution settings; check `OPTIONS_EXECUTION.md`
-   rather than silently treating that extension as the default baseline.
+   The selected ETH active sample enables `rfq_v3` atomic options. The selected
+   SOL active sample is perp-only; paused baseline/options-only examples are not
+   alternatives for this launch. Check `OPTIONS_EXECUTION.md` for lifecycle details.
    The team must install the complete shared Python package and controller in
    Hummingbot before this loop is started; this repository installer does not
    start the loop or bot.
@@ -107,8 +113,8 @@ fall back to `hummingbot/hummingbot:latest` without the installed shared package
    `risk_state_id: flyby-competition`. Don't switch to `competition_scalp`,
    activate `condor_active`, raise leverage/budget, reset checkpoints or reduce
    thresholds to chase volume. An incompatible venue minimum means skip/report.
-4. Keep default samples' options disabled and keep portfolio margin/spot hedge
-   disabled in every profile. In an explicitly approved RFQ profile, observe
+4. Keep paused reference samples' options disabled, selected ETH options enabled,
+   and portfolio margin/spot hedge disabled in every profile. For ETH, observe
    `options_execution` phase, acknowledged submissions, uncertainty, fees and
    reconciled paired closes. Option prices, Greeks, delta, OI/skew and spread
    plans aren't permission for this LLM to submit orders.
@@ -169,9 +175,10 @@ must never submit raw/private Derive orders, create independent executors, or
 change signals, caps, IDs, budget, leverage, or risk latches.
 
 Before first deployment, require the team's installed runtime, correct mainnet
-connector, authenticated account and reconciled exposure with no unknown
-positions/orders. The controller then verifies its margin, streams and risk
-checkpoint before entry; journal its warm-up/blockers while it initializes.
+connector, selected credentials profile and unambiguous owned bot/config IDs.
+Known foreign exposure or conflicting ownership still requires resolution.
+The controller authenticates and verifies full margin, streams, reconciliation
+and its risk checkpoint before entry; journal warm-up/blockers while it initializes.
 For unknown exposure, failed close,
 drift, stale margin or unhealthy stream, hold new entries and report; controller
 protective exits remain active. Never stop the whole bot while it needs to

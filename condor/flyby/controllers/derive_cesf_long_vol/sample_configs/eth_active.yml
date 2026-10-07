@@ -3,6 +3,7 @@ id: flyby-eth-active-001
 controller_name: derive_cesf_long_vol
 controller_type: directional_trading
 manual_kill_switch: false
+trailing_stop: null
 connector_name: derive_perpetual
 trading_pair: ETH-USDC
 candles_connector: binance_perpetual

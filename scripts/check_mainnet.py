@@ -64,7 +64,8 @@ def validate_profiles(root=ROOT):
 
     # Separate operator activation configs are opt-in and must match the exact
     # reviewed ETH+SOL values; the default/sample profiles above remain paused.
-    active_common = {**FIXED_SETTINGS, "manual_kill_switch": False, "max_perp_positions": 2, "max_option_spreads": 2}
+    active_common = {**FIXED_SETTINGS, "manual_kill_switch": False, "trailing_stop": None,
+                     "max_perp_positions": 2, "max_option_spreads": 2}
     active_expected = {
         "eth": {**active_common, "id": "flyby-eth-active-001", "trading_pair": "ETH-USDC",
                 "candles_connector": "binance_perpetual", "candles_trading_pair": "ETH-USDT",

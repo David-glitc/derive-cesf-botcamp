@@ -310,6 +310,30 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
                 "margin_source": state["source"], "margin_age": now - state["observed_at"],
                 "reconciled": known_orders and known_positions and known_options}
 
+    def _book_is_fresh(self, connector, book, now):
+        # Derive publishes FULL snapshots: HB advances snapshot_uid, not
+        # last_diff_uid. Reading a cache is not evidence of a new publication.
+        uid = (getattr(book, "snapshot_uid", None), book.last_diff_uid)
+        tracker = getattr(connector, "order_book_tracker", None)
+        source = getattr(tracker, "data_source", None)
+        messages = getattr(source, "_snapshot_messages", None)
+        if isinstance(messages, dict):
+            message = messages.get(self.config.trading_pair)
+            try:
+                observed = float(message.timestamp)
+                matched = message.update_id == uid[0]
+                valid = (matched and np.isfinite(observed) and observed > 0
+                         and 0 <= now - observed <= self.config.max_book_age)
+            except (AttributeError, ValueError, TypeError):
+                observed, valid = 0, False
+            self._last_book_time = observed if valid else 0
+        elif self._last_book_uid is not None and uid != self._last_book_uid:
+            # Other adapters must demonstrate progress; never timestamp an
+            # unknown cached initial book as fresh merely on first inspection.
+            self._last_book_time = now
+        self._last_book_uid = uid
+        return self._last_book_time > 0 and 0 <= now - self._last_book_time <= self.config.max_book_age
+
     async def update_processed_data(self):
         try:
             now = self.market_data_provider.time()
@@ -325,11 +349,7 @@ class DeriveCesfLongVolController(DirectionalTradingControllerBase):
             if not 0 <= user_age <= self.config.max_user_stream_age:
                 return self._halt("stale_user_stream")
             book = connector.get_order_book(self.config.trading_pair)
-            uid = book.last_diff_uid
-            if self._last_book_uid is not None and uid != self._last_book_uid:
-                self._last_book_time = now
-            self._last_book_uid = uid
-            if now - self._last_book_time > self.config.max_book_age:
+            if not self._book_is_fresh(connector, book, now):
                 return self._halt("stale_order_book")
             if self.config.signal_source == "derive_native":
                 ccy = self.config.trading_pair.split("-")[0]

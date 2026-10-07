@@ -140,7 +140,8 @@ def validate_package(root=ROOT, condor_root=None):
         if source.read_bytes() != target.read_bytes():
             raise ValueError(f"condor_active_sample_drift:{market}")
         active = yaml.safe_load(target.read_text())
-        expected = {**FIXED_SETTINGS, "manual_kill_switch": False, "max_perp_positions": 2, "max_option_spreads": 2,
+        expected = {**FIXED_SETTINGS, "manual_kill_switch": False, "trailing_stop": None,
+                    "max_perp_positions": 2, "max_option_spreads": 2,
                     "id": f"flyby-{market}-active-001", "trading_pair": market.upper() + "-USDC",
                     "candles_connector": "binance_perpetual", "candles_trading_pair": market.upper() + "-USDT"}
         if market == "eth":

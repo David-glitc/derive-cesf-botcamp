@@ -1,6 +1,6 @@
 ---
 type: directional_trading
-description: Mainnet-only Flyby V2 controller; atomic options RFQs require explicit opt-in
+description: Mainnet Flyby V2 controller on Derive V3; selected ETH atomic options and ETH/SOL perps
 ---
 
 # derive_cesf_long_vol
@@ -18,9 +18,11 @@ pinned Hummingbot client before syncing this controller. The runtime refuses ent
 without compatibility and fresh authenticated net-margin state. A controller-only
 Condor upload doesn't install dependencies or patch the client.
 
-The active ETH/SOL profiles are available only to the continuous Condor loop,
-which checks account, market, stream and reconciliation readiness before it
-deploys/starts the owned bot. Generic samples remain paused. Only
+The continuous Condor loop launches the exact active ETH/SOL profiles.
+It resolves the runtime, configured mainnet account and ownership before launch;
+the controller checks fresh private account state, markets, reconciliation and
+risk checkpoints before placing orders. These live checks must not be circular
+pre-deployment requirements. Generic samples remain paused. Only
 `derive_perpetual` is accepted. Testnet and paper-trading connector
 overrides fail validation; a wrong or unknown runtime connector domain emits
 no executor actions. Mainnet uses the reviewed Derive V3 connector and signer
@@ -40,9 +42,16 @@ Fresh public context can populate a fee-aware shadow plan; the detailed
 Condor view exposes `options_delta`, never a live hedge authorization.
 Read the [delta evidence](../../../../reports/DELTA_OPTIONS_REPORT.md).
 
-This controller also implements paired options execution through
-Derive v2 RFQs, not the perpetual executor. Use the separately installed paused
-`conf_flyby_options_eth.yml` OR `conf_flyby_options_btc.yml` after explicit operator
-approval and mainnet verification; don't change the fixed samples silently.
+This controller implements paired options execution through
+Derive V3 RFQs, not the perpetual executor. The selected `eth_active` sample
+enables options; `sol_active` is perp-only. The separately paused
+`conf_flyby_options_eth.yml` and `conf_flyby_options_btc.yml` are unselected examples.
 See [options execution](../../../../OPTIONS_EXECUTION.md). Unknown execution
 acknowledgements and unmatched inventory block entries; don't reset their journal.
+
+Derive publishes full order-book snapshots, so freshness uses a matching
+native snapshot timestamp and `snapshot_uid`, not just `last_diff_uid`.
+Repeated reads never refresh an old publication. The 30-second book limit,
+60-second private-stream limit and all fee, position and drawdown gates remain.
+Active configs explicitly include `trailing_stop: null` to satisfy Condor's
+template validator without enabling trailing stops or changing sizing.
